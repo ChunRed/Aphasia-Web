@@ -19,15 +19,17 @@ export const metadata: Metadata = {
   description: "數位藝術節 - Aphasia Web",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "無關緊要",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#09090b", // Matches bg-zinc-950
+  themeColor: "#fafaf9", // Matches Muji off-white bg
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
 };
 
