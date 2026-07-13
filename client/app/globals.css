@@ -62,3 +62,16 @@ body {
   opacity: 0;
   animation: widthExpand 2s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
 }
+
+@keyframes cursorBreath {
+  0%, 100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.animate-cursor-breath {
+  animation: cursorBreath 1.6s ease-in-out infinite;
+}

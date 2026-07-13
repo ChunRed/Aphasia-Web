@@ -34,29 +34,47 @@ export default function MujiInput() {
   };
 
   return (
-    <div className="w-full max-w-sm mx-auto mt-6 animate-fade-in-delayed">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="relative w-full">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="請輸入文字（10 - 200 字）..."
-            maxLength={250} // Allow typing slightly over 200 to show the failure popup instead of hard cut-off
-            rows={4}
-            className="w-full px-4 py-3 bg-[#f5f5f4] border border-stone-200 focus:border-stone-400 focus:outline-none text-stone-800 placeholder-stone-400 text-base md:text-sm tracking-widest leading-relaxed resize-none transition-colors duration-300 font-light"
-          />
-          <div className="absolute bottom-3 right-4 text-[10px] text-stone-400 tracking-wider font-mono select-none">
-            {text.length} / 200
-          </div>
-        </div>
+    <>
+      <div className="w-full max-w-sm mx-auto mt-6 animate-fade-in-delayed">
+        <form id="muji-form" onSubmit={handleSubmit} className="flex flex-col gap-8">
+          <div className="flex flex-col gap-2">
+            {/* Custom label instead of placeholder */}
+            <div className="text-stone-400 text-[11px] tracking-[0.2em] text-left select-none opacity-80">
+              請輸入文字（10 - 200 字）
+            </div>
 
-        <button
-          type="submit"
-          className="w-full py-3 bg-stone-800 hover:bg-stone-700 text-stone-100 font-light tracking-[0.3em] text-xs transition-colors duration-300 focus:outline-none"
-        >
-          送出 / SUBMIT
-        </button>
-      </form>
+            <div className="relative w-full">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                maxLength={250} // Allow typing slightly over 200 to show the failure popup instead of hard cut-off
+                rows={6}
+                className="w-full px-0 py-2 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-stone-800 text-base md:text-sm tracking-widest leading-relaxed resize-none transition-colors duration-300 font-light"
+              />
+
+              {/* Custom breathing cursor '|' when empty */}
+              {text === "" && (
+                <div className="absolute top-2 left-0 text-stone-400 select-none pointer-events-none text-base md:text-sm font-light animate-cursor-breath">
+                  |
+                </div>
+              )}
+
+              {/* Character indicator */}
+              <div className="text-right text-[10px] text-stone-400 tracking-wider font-mono select-none mt-1">
+                {text.length} / 200
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <button
+        type="submit"
+        form="muji-form"
+        className="fixed bottom-12 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-sm py-3 bg-stone-200 hover:bg-stone-300 text-stone-800 font-light tracking-[0.3em] text-xs transition-colors duration-300 focus:outline-none z-20"
+      >
+        送出 / SUBMIT
+      </button>
 
       {/* Muji Style Modal Overlay */}
       {modal.show && (
@@ -70,7 +88,7 @@ export default function MujiInput() {
                 <span className="text-stone-400 text-4xl font-extralight">✕</span>
               )}
             </div>
-            
+
             {/* Message */}
             <div className="text-stone-700 text-xs sm:text-sm font-extralight tracking-widest leading-loose whitespace-pre-line mb-6">
               {modal.message}
@@ -87,6 +105,6 @@ export default function MujiInput() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

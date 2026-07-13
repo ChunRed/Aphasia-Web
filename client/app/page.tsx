@@ -2,7 +2,7 @@ import MujiInput from "@/components/MujiInput";
 
 export default function Home() {
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-[#fafaf9] p-6 text-center select-none overflow-hidden">
+    <div className="relative flex min-h-screen flex-col items-center justify-start md:justify-center bg-[#fafaf9] p-6 pt-20 md:pt-6 text-center select-none overflow-hidden">
       {/* Subtle background radial pattern for light mode */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.02)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
       
