@@ -49,12 +49,12 @@ export default function MujiInput() {
                 onChange={(e) => setText(e.target.value)}
                 maxLength={250} // Allow typing slightly over 200 to show the failure popup instead of hard cut-off
                 rows={6}
-                className="w-full px-0 py-2 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-stone-800 text-base md:text-sm tracking-widest leading-relaxed resize-none transition-colors duration-300 font-light"
+                className="w-full px-0 py-2 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-stone-800 text-2xl md:text-xl tracking-widest leading-relaxed resize-none transition-colors duration-300 font-light"
               />
 
               {/* Custom breathing cursor '|' when empty */}
               {text === "" && (
-                <div className="absolute top-2 left-0 text-stone-400 select-none pointer-events-none text-base md:text-sm font-light animate-cursor-breath">
+                <div className="absolute top-2 left-0 text-stone-400 select-none pointer-events-none text-2xl md:text-xl font-light animate-cursor-breath">
                   |
                 </div>
               )}
