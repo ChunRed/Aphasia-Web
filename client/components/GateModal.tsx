@@ -17,11 +17,14 @@ export default function GateModal({ isOpen, onPassGate }: GateModalProps) {
 
   const handleSuccess = (t: string) => {
     setToken(t);
-    setIsLeaving(true);
+    // Wait 3 seconds (3000ms) after verification succeeds before auto-transitioning
     setTimeout(() => {
-      onPassGate(t);
-      setIsLeaving(false);
-    }, 400);
+      setIsLeaving(true);
+      setTimeout(() => {
+        onPassGate(t);
+        setIsLeaving(false);
+      }, 400);
+    }, 3000);
   };
 
   const handleEnter = () => {
@@ -81,7 +84,7 @@ export default function GateModal({ isOpen, onPassGate }: GateModalProps) {
           }`}
         >
           {token ? (
-            "驗證通過，自動進入中..."
+            "驗證成功，即將進入展演空間..."
           ) : (
             <ScrambleText
               text="進行無感驗證中..."
@@ -95,5 +98,6 @@ export default function GateModal({ isOpen, onPassGate }: GateModalProps) {
     </div>
   );
 }
+
 
 
