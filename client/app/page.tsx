@@ -3,9 +3,16 @@
 import { useState } from "react";
 import MujiInput from "@/components/MujiInput";
 import IntroModal from "@/components/IntroModal";
+import ScrambleText from "@/components/ScrambleText";
 
 export default function Home() {
   const [showIntro, setShowIntro] = useState(true);
+  const [hasEntered, setHasEntered] = useState(false);
+
+  const handleCloseIntro = () => {
+    setShowIntro(false);
+    setHasEntered(true);
+  };
 
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-start md:justify-center bg-[#fafaf9] p-6 pt-20 md:pt-6 text-center select-none overflow-hidden">
@@ -17,24 +24,68 @@ export default function Home() {
 
       <main className="relative z-10 flex flex-col items-center justify-center max-w-2xl gap-8 w-full">
         <div className="flex flex-col items-center justify-center gap-4">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-extralight tracking-[0.4em] leading-[2.2] text-stone-800 drop-shadow-sm animate-fade-in select-text">
-            那些文字已經無關緊要了
+          <h1
+            className={`text-xl sm:text-2xl md:text-3xl font-extralight tracking-[0.4em] leading-[2.2] text-stone-800 drop-shadow-sm select-text ${
+              hasEntered ? "animate-fade-in" : "opacity-0"
+            }`}
+          >
+            <ScrambleText
+              text="那些文字已經無關緊要了"
+              trigger={hasEntered}
+              delay={200}
+              duration={1200}
+              periodicGlitch={true}
+              glitchIntervalMin={2000}
+              glitchIntervalMax={4500}
+            />
           </h1>
-          <div className="h-[1px] w-12 bg-stone-300 animate-width-expand mt-1" />
-          <p className="text-stone-500 text-[10px] sm:text-xs tracking-[0.5em] uppercase font-mono mt-1 opacity-60 select-text animate-fade-in-delayed">
-            Aphasia Web
+          <div
+            className={`h-[1px] bg-stone-300 mt-1 ${
+              hasEntered ? "animate-width-expand" : "w-0 opacity-0"
+            }`}
+          />
+          <p
+            className={`text-stone-500 text-[10px] sm:text-xs tracking-[0.5em] uppercase font-mono mt-1 select-text ${
+              hasEntered ? "animate-fade-in-delayed" : "opacity-0"
+            }`}
+          >
+            <ScrambleText
+              text="Aphasia Web"
+              trigger={hasEntered}
+              delay={600}
+              duration={900}
+              periodicGlitch={true}
+              glitchIntervalMin={3500}
+              glitchIntervalMax={7000}
+            />
           </p>
         </div>
 
-        <MujiInput />
+        <MujiInput isVisible={hasEntered} />
       </main>
 
-      <IntroModal isOpen={showIntro} onClose={() => setShowIntro(false)} />
+      <IntroModal
+        isOpen={showIntro}
+        onClose={handleCloseIntro}
+        onStartExperience={() => setHasEntered(true)}
+      />
 
       {/* Footer copyright */}
-      <footer className="fixed bottom-4 left-0 w-full text-center text-[10px] text-stone-400 tracking-[0.25em] font-light font-mono select-none pointer-events-none z-10 opacity-70">
-        @ No Side Here
+      <footer
+        className={`fixed bottom-4 left-0 w-full text-center text-[10px] text-stone-400 tracking-[0.25em] font-light font-mono select-none pointer-events-none z-10 ${
+          hasEntered ? "animate-fade-in-delayed opacity-70" : "opacity-0"
+        }`}
+      >
+        <ScrambleText
+          text="@ No Side Here"
+          trigger={hasEntered}
+          delay={900}
+          duration={800}
+        />
       </footer>
     </div>
   );
 }
+
+
+

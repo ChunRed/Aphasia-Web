@@ -1,8 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import ScrambleText from "@/components/ScrambleText";
 
-export default function MujiInput() {
+interface MujiInputProps {
+  isVisible?: boolean;
+}
+
+export default function MujiInput({ isVisible = true }: MujiInputProps) {
   const [text, setText] = useState("");
   const [modal, setModal] = useState<{
     show: boolean;
@@ -35,12 +40,21 @@ export default function MujiInput() {
 
   return (
     <>
-      <div className="w-full max-w-sm mx-auto mt-6 animate-fade-in-delayed">
+      <div
+        className={`w-full max-w-sm mx-auto mt-6 ${
+          isVisible ? "animate-fade-in-delayed" : "opacity-0 pointer-events-none"
+        }`}
+      >
         <form id="muji-form" onSubmit={handleSubmit} className="flex flex-col gap-8">
           <div className="flex flex-col gap-2">
             {/* Custom label instead of placeholder */}
             <div className="text-stone-400 text-[11px] tracking-[0.2em] text-left select-none opacity-80">
-              請輸入文字（10 - 200 字）
+              <ScrambleText
+                text="請輸入文字（10 - 200 字）"
+                trigger={isVisible}
+                delay={750}
+                duration={1000}
+              />
             </div>
 
             <div className="relative w-full">
@@ -71,10 +85,18 @@ export default function MujiInput() {
       <button
         type="submit"
         form="muji-form"
-        className="fixed bottom-12 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-sm py-3 bg-stone-200 hover:bg-stone-300 text-stone-800 font-light tracking-[0.3em] text-xs transition-colors duration-300 focus:outline-none z-20"
+        className={`fixed bottom-12 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-sm py-3 bg-stone-200 hover:bg-stone-300 text-stone-800 font-light tracking-[0.3em] text-xs transition-colors duration-300 focus:outline-none z-20 ${
+          isVisible ? "animate-fade-in-delayed" : "opacity-0 pointer-events-none"
+        }`}
       >
-        送出 / SUBMIT
+        <ScrambleText
+          text="送出 / SUBMIT"
+          trigger={isVisible}
+          delay={850}
+          duration={900}
+        />
       </button>
+
 
       {/* Muji Style Modal Overlay */}
       {modal.show && (
@@ -108,3 +130,4 @@ export default function MujiInput() {
     </>
   );
 }
+

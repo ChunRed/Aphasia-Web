@@ -8,11 +8,11 @@ const nextConfig: NextConfig = {
   ...(isVercel
     ? {}
     : {
-        turbopack: {
-          root: path.resolve(typeof __dirname !== "undefined" ? __dirname : "."),
-        },
-      }),
+      turbopack: {
+        root: path.resolve(typeof __dirname !== "undefined" ? __dirname : "."),
+      },
+    }),
 
-  allowedDevOrigins: ["192.168.0.181", "192.168.0.181:3000"],
+  allowedDevOrigins: ["192.168.0.181", "192.168.0.181:3000", "192.168.0.187", "192.168.0.187:3000"],
 };
 export default nextConfig;
