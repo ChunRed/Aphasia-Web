@@ -1,25 +1,42 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import io from "socket.io-client";
+import { SOCKET_EVENTS } from "../config/constants";
+import { DisplayMessageData } from "./MessageDisplay";
 
 type SocketType = ReturnType<typeof io>;
 
 interface SocketManagerProps {
-  onMessageReceived?: (data: any) => void;
+  onMessageReceived?: (data: DisplayMessageData) => void;
+  onRequestNextRef?: (requestFn: () => void) => void;
 }
 
-export default function SocketManager({ onMessageReceived }: SocketManagerProps) {
+export default function SocketManager({
+  onMessageReceived,
+  onRequestNextRef,
+}: SocketManagerProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [socketId, setSocketId] = useState<string>("");
-  const [, setSocketInstance] = useState<SocketType | null>(null);
+  const socketRef = useRef<SocketType | null>(null);
+
+  const requestNextMessage = useCallback(() => {
+    if (socketRef.current && socketRef.current.connected) {
+      console.log("📤 [Mobile Display] Emitting request_next to server...");
+      socketRef.current.emit(SOCKET_EVENTS.REQUEST_NEXT);
+    }
+  }, []);
 
   useEffect(() => {
-    // Initialize socket connection (connects to current origin automatically)
+    onRequestNextRef?.(requestNextMessage);
+  }, [onRequestNextRef, requestNextMessage]);
+
+  useEffect(() => {
     const socket = io({
       transports: ["websocket", "polling"],
       autoConnect: true,
     });
+    socketRef.current = socket;
 
     socket.on("connect", () => {
       console.log("⚡ [Mobile Display] Connected to Socket.IO server, ID:", socket.id);
@@ -33,12 +50,10 @@ export default function SocketManager({ onMessageReceived }: SocketManagerProps)
       setSocketId("");
     });
 
-    socket.on("message", (data: any) => {
-      console.log("📩 [Mobile Display] Message received:", data);
+    socket.on(SOCKET_EVENTS.DISPLAY_MESSAGE, (data: DisplayMessageData) => {
+      console.log("📩 [Mobile Display] Message received from server:", data);
       onMessageReceived?.(data);
     });
-
-    setSocketInstance(socket);
 
     return () => {
       socket.disconnect();
@@ -46,15 +61,15 @@ export default function SocketManager({ onMessageReceived }: SocketManagerProps)
   }, [onMessageReceived]);
 
   return (
-    <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 bg-stone-900/80 backdrop-blur-sm border border-stone-800 rounded-full text-[10px] font-mono tracking-widest text-stone-300 shadow-md select-none">
+    <div className="inline-flex items-center gap-2 px-3 py-1 bg-white border border-neutral-200 rounded-full text-[10px] font-mono tracking-widest text-neutral-600 select-none shadow-xs">
       <span
-        className={`w-2 h-2 rounded-full transition-colors duration-300 ${
-          isConnected ? "bg-emerald-400 animate-pulse" : "bg-amber-500 animate-ping"
+        className={`w-1.5 h-1.5 rounded-full transition-all duration-500 ${
+          isConnected ? "bg-neutral-900" : "bg-neutral-300 animate-pulse"
         }`}
       />
-      <span>{isConnected ? "SOCKET CONNECTED" : "CONNECTING..."}</span>
+      <span>{isConnected ? "ONLINE" : "CONNECTING"}</span>
       {socketId && (
-        <span className="text-stone-500 hidden sm:inline">({socketId.slice(0, 6)})</span>
+        <span className="text-neutral-400 hidden sm:inline">#{socketId.slice(0, 4)}</span>
       )}
     </div>
   );
