@@ -13,7 +13,8 @@ export default function GateModal({ isOpen, onPassGate }: GateModalProps) {
   const [token, setToken] = useState("");
   const [isLeaving, setIsLeaving] = useState(false);
 
-  if (!isOpen) return null;
+  const isDisplayed = isOpen;
+  if (!isDisplayed && !isLeaving) return null;
 
   const handleSuccess = (t: string) => {
     setToken(t);
