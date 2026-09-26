@@ -26,11 +26,12 @@ const WordCloudContext = createContext<WordCloudContextType | undefined>(undefin
 export const WordCloudProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { words, loading, error, refetch } = useCloudData({
     url: "/cloud-text.txt",
-    minSize: 14,
-    maxSize: 88,
+    minSize: 18,
+    maxSize: 64,
   });
 
-  const [fontFamily, setFontFamilyState] = useState<string>("sans-serif");
+  // Default font is set to "serif" (明體) per user requirement
+  const [fontFamily, setFontFamilyState] = useState<string>("serif");
   const [layoutKey, setLayoutKeyState] = useState<number>(0);
   const [opacity, setOpacityState] = useState<number>(0.35);
 

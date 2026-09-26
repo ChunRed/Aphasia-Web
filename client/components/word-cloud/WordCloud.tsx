@@ -9,45 +9,49 @@ export const WordCloud: React.FC<WordCloudProps> = ({
   words,
   width = 960,
   height = 650,
-  fontFamily = "sans-serif",
+  fontFamily = "serif",
   className = "",
 }) => {
   const [placedWords, setPlacedWords] = useState<PlacedWord[]>([]);
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
   const instanceId = useId();
 
+  // Font family resolution for CSS styling and canvas measurement
+  const resolvedFontFamily = React.useMemo(() => {
+    if (fontFamily === "serif") {
+      return '"Noto Serif TC", "Songti TC", "PMingLiU", "Times New Roman", serif';
+    }
+    if (fontFamily === "monospace") {
+      return '"Geist Mono", monospace, sans-serif';
+    }
+    return '"Geist Sans", sans-serif';
+  }, [fontFamily]);
+
   // Helper to determine font weight per word size (ensures measurement alignment in d3-cloud)
   const getWordWeight = (size: number): number => {
-    if (size >= 60) return 800;
-    if (size >= 36) return 600;
-    if (size >= 24) return 400;
-    return 300;
+    if (size >= 40) return 700;
+    if (size >= 28) return 500;
+    return 400;
   };
 
   // Helper to determine styling (fill color, font weight, letter spacing) for light mode poster aesthetic
   const getWordStyle = (size: number) => {
-    if (size >= 60) {
+    if (size >= 40) {
       return {
-        fill: "rgba(0, 0, 0, 0.95)",
-        fontWeight: 800,
+        fill: "rgba(0, 0, 0, 0.92)",
+        fontWeight: 700,
         letterSpacing: "0.02em",
       };
-    } else if (size >= 36) {
+    } else if (size >= 28) {
       return {
-        fill: "rgba(0, 0, 0, 0.78)",
-        fontWeight: 600,
+        fill: "rgba(0, 0, 0, 0.72)",
+        fontWeight: 500,
         letterSpacing: "0.01em",
-      };
-    } else if (size >= 24) {
-      return {
-        fill: "rgba(0, 0, 0, 0.58)",
-        fontWeight: 400,
-        letterSpacing: "0em",
       };
     } else {
       return {
-        fill: "rgba(0, 0, 0, 0.38)",
-        fontWeight: 300,
+        fill: "rgba(0, 0, 0, 0.45)",
+        fontWeight: 400,
         letterSpacing: "0em",
       };
     }
@@ -61,7 +65,7 @@ export const WordCloud: React.FC<WordCloudProps> = ({
 
     setIsCalculating(true);
 
-    // Configure d3-cloud layout with generous padding to prevent text collision/overlapping
+    // Configure d3-cloud layout with tight padding (4px) for dense word packing
     const layout = cloud<cloud.Word>()
       .size([width, height])
       .words(
@@ -70,11 +74,11 @@ export const WordCloud: React.FC<WordCloudProps> = ({
           size: w.size,
         }))
       )
-      // Generous padding (12px) to prevent bounding box overlaps
-      .padding(12)
+      // Tight padding (4px) to ensure words sit close together ("密一點")
+      .padding(4)
       // Restrict rotation strictly to 0° or 90° for vertical/horizontal mixed layout
       .rotate((_, index) => (index % 3 === 0 ? 90 : 0))
-      .font(fontFamily)
+      .font(resolvedFontFamily)
       .fontSize((d) => d.size || 16)
       .fontWeight((d) => getWordWeight(d.size || 16))
       .spiral("archimedean")
@@ -88,16 +92,17 @@ export const WordCloud: React.FC<WordCloudProps> = ({
     return () => {
       layout.stop();
     };
-  }, [words, width, height, fontFamily]);
+  }, [words, width, height, resolvedFontFamily]);
 
   return (
-    <div className={`relative flex items-center justify-center w-full overflow-hidden ${className}`}>
-      {/* SVG Canvas with centered viewBox (-width/2, -height/2, width, height) */}
+    <div className={`relative flex items-center justify-center w-full h-full overflow-hidden ${className}`}>
+      {/* SVG Canvas expanding 100% full screen */}
       <svg
         width="100%"
         height="100%"
         viewBox={`-${width / 2} -${height / 2} ${width} ${height}`}
-        className="w-full h-auto max-h-[80vh] select-none overflow-visible"
+        preserveAspectRatio="xMidYMid meet"
+        className="w-full h-full select-none overflow-visible"
         aria-label="Word Cloud Canvas"
       >
         <AnimatePresence mode="wait">
@@ -105,39 +110,35 @@ export const WordCloud: React.FC<WordCloudProps> = ({
             <g key={`cloud-group-${words.length}`}>
               {placedWords.map((word, idx) => {
                 const style = getWordStyle(word.size);
-                // Stagger delay based on index for progressive entrance
-                const delay = (idx % 15) * 0.04 + (idx / placedWords.length) * 0.15;
+                // Stagger delay per word
+                const delay = 0.1 + idx * 0.045;
+
+                // Timeline: 0.6s Fade-in -> 5.0s Hold -> 1.2s Fade-out (Total 6.8s per word)
+                const fadeInRatio = 0.6 / 6.8;
+                const holdRatio = 5.6 / 6.8;
 
                 return (
                   <motion.g
                     key={`${instanceId}-${word.text}-${idx}`}
                     initial={{
                       opacity: 0,
-                      scale: 0.4,
+                      scale: 0.3,
                       x: word.x,
                       y: word.y,
                       rotate: word.rotate,
                     }}
                     animate={{
-                      opacity: 1,
-                      scale: 1,
+                      opacity: [0, 1, 1, 0],
+                      scale: [0.3, 1, 1, 0.4],
                       x: word.x,
                       y: word.y,
                       rotate: word.rotate,
                     }}
-                    exit={{
-                      opacity: 0,
-                      scale: 0.2,
-                      transition: { duration: 0.2 },
-                    }}
                     transition={{
-                      duration: 0.6,
+                      duration: 6.8,
                       delay,
-                      ease: [0.16, 1, 0.3, 1],
-                    }}
-                    whileHover={{
-                      scale: 1.15,
-                      transition: { duration: 0.2 },
+                      times: [0, fadeInRatio, holdRatio, 1],
+                      ease: "easeInOut",
                     }}
                     className="cursor-pointer group"
                   >
@@ -145,7 +146,7 @@ export const WordCloud: React.FC<WordCloudProps> = ({
                       textAnchor="middle"
                       dominantBaseline="central"
                       style={{
-                        fontFamily,
+                        fontFamily: resolvedFontFamily,
                         fontSize: `${word.size}px`,
                         fontWeight: style.fontWeight,
                         letterSpacing: style.letterSpacing,

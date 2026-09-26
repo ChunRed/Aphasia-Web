@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { WordCloud } from "./WordCloud";
 import { useWordCloudContext } from "./WordCloudContext";
 
@@ -14,10 +14,30 @@ export const BackgroundWordCloud: React.FC<BackgroundWordCloudProps> = ({
   visible = true,
 }) => {
   const { words, loading, error, fontFamily, layoutKey, opacity } = useWordCloudContext();
+  const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
+    width: 700,
+    height: 1200,
+  });
 
-  // If not visible or data is loading/error, do not mount WordCloud into DOM.
-  // This ensures that when visible becomes true, WordCloud mounts fresh and triggers
-  // each individual word's framer-motion stagger fade-in animation sequentially.
+  useEffect(() => {
+    const updateDimensions = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      // Dynamically adapt layout canvas aspect ratio based on device orientation
+      if (w < 768) {
+        // Mobile portrait canvas (700 x 1200) ensures words spread from top to bottom on phone screens
+        setDimensions({ width: 700, height: 1250 });
+      } else {
+        // Desktop landscape canvas (1200 x 800)
+        setDimensions({ width: 1250, height: 800 });
+      }
+    };
+
+    updateDimensions();
+    window.addEventListener("resize", updateDimensions);
+    return () => window.removeEventListener("resize", updateDimensions);
+  }, []);
+
   if (!visible || loading || error || !words.length) {
     return null;
   }
@@ -28,12 +48,12 @@ export const BackgroundWordCloud: React.FC<BackgroundWordCloudProps> = ({
       style={{ opacity }}
     >
       <WordCloud
-        key={`bg-cloud-${layoutKey}-${fontFamily}`}
+        key={`bg-cloud-${layoutKey}-${fontFamily}-${dimensions.width}x${dimensions.height}`}
         words={words}
-        width={1100}
-        height={750}
+        width={dimensions.width}
+        height={dimensions.height}
         fontFamily={fontFamily}
-        className="w-full h-full max-w-6xl max-h-screen"
+        className="w-full h-full"
       />
     </div>
   );

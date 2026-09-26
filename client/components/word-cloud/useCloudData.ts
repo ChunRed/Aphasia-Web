@@ -21,7 +21,7 @@ interface UseCloudDataReturn {
  * Custom Hook: Fetches public/cloud-text.txt and parses lines into weighted word data.
  */
 export function useCloudData(options: UseCloudDataOptions = {}): UseCloudDataReturn {
-  const { url = "/cloud-text.txt", minSize = 14, maxSize = 88 } = options;
+  const { url = "/cloud-text.txt", minSize = 16, maxSize = 48 } = options;
   const [words, setWords] = useState<WordItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,22 +42,19 @@ export function useCloudData(options: UseCloudDataOptions = {}): UseCloudDataRet
         .map((line) => line.trim())
         .filter((line) => line.length > 0);
 
-      // Assign visual weights/sizes with poster-style hierarchy suitable for Chinese & Numbers
+      // Assign visual weights/sizes suited for dense layout with many words
       const parsedWords: WordItem[] = lines.map((line, index) => {
         let size = 24;
 
-        // Numbered tags (e.g. "1.", "23.", "60.", "104.")
-        if (/^\d+\.?$/.test(line)) {
-          size = 64 + (index % 4) * 10; // Large numbers 64px - 94px
-        } else if (line.length <= 4) {
-          // Short Chinese phrases (1-4 characters, e.g. "失語症", "隱含空間")
-          size = 36 + (line.length % 3) * 6; // 36px - 48px
-        } else if (line.length <= 8) {
-          // Medium Chinese phrases (5-8 characters, e.g. "湧現反饋迴路")
-          size = 24 + (line.length % 3) * 4; // 24px - 32px
+        if (line.length <= 3) {
+          // Short 2-3 character phrases
+          size = 34 + (index % 4) * 3; // 34px - 43px
+        } else if (line.length <= 6) {
+          // Medium 4-6 character phrases
+          size = 24 + (index % 4) * 2; // 24px - 30px
         } else {
-          // Longer Chinese sentences (e.g. "模型無法記起賦予它生命的提示詞")
-          size = 15 + (line.length % 3) * 2; // 15px - 19px
+          // Longer phrases & sentences
+          size = 18 + (index % 3) * 2; // 18px - 22px
         }
 
         // Clamp size range
