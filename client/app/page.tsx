@@ -5,6 +5,7 @@ import MujiInput from "@/components/MujiInput";
 import IntroModal from "@/components/IntroModal";
 import GateModal from "@/components/GateModal";
 import ScrambleText from "@/components/ScrambleText";
+import { BackgroundWordCloud } from "@/components/word-cloud";
 
 export default function Home() {
   const [isVerifiedAndPassed, setIsVerifiedAndPassed] = useState(false);
@@ -26,11 +27,14 @@ export default function Home() {
 
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-start md:justify-center bg-[#fafaf9] p-6 pt-20 md:pt-6 text-center select-none overflow-hidden">
+      {/* 0. Synchronized Background Word Cloud (Only mounts & animates after IntroModal is confirmed) */}
+      <BackgroundWordCloud visible={hasEntered} />
+
       {/* Subtle background radial pattern for light mode */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.02)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.02)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-[1]" />
 
       {/* Ambient soft warm light */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-stone-200/20 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-stone-200/20 rounded-full blur-[120px] pointer-events-none z-[1]" />
 
       {/* 1. Security Gate Modal (安全入口閘門) */}
       <GateModal
@@ -44,9 +48,8 @@ export default function Home() {
           <main className="relative z-10 flex flex-col items-center justify-center max-w-2xl gap-8 w-full">
             <div className="flex flex-col items-center justify-center gap-4">
               <h1
-                className={`text-xl sm:text-2xl md:text-3xl font-extralight tracking-[0.4em] leading-[2.2] text-stone-800 drop-shadow-sm select-text ${
-                  hasEntered ? "animate-fade-in" : "opacity-0"
-                }`}
+                className={`text-xl sm:text-2xl md:text-3xl font-extralight tracking-[0.4em] leading-[2.2] text-stone-800 drop-shadow-sm select-text ${hasEntered ? "animate-fade-in" : "opacity-0"
+                  }`}
               >
                 <ScrambleText
                   text="那些文字已經無關緊要了"
@@ -59,14 +62,12 @@ export default function Home() {
                 />
               </h1>
               <div
-                className={`h-[1px] bg-stone-300 mt-1 ${
-                  hasEntered ? "animate-width-expand" : "w-0 opacity-0"
-                }`}
+                className={`h-[1px] bg-stone-300 mt-1 ${hasEntered ? "animate-width-expand" : "w-0 opacity-0"
+                  }`}
               />
               <p
-                className={`text-stone-500 text-[10px] sm:text-xs tracking-[0.5em] uppercase font-mono mt-1 select-text ${
-                  hasEntered ? "animate-fade-in-delayed" : "opacity-0"
-                }`}
+                className={`text-stone-500 text-[10px] sm:text-xs tracking-[0.5em] uppercase font-mono mt-1 select-text ${hasEntered ? "animate-fade-in-delayed" : "opacity-0"
+                  }`}
               >
                 <ScrambleText
                   text="Aphasia Web"
@@ -92,9 +93,8 @@ export default function Home() {
 
           {/* Footer copyright */}
           <footer
-            className={`fixed bottom-4 left-0 w-full text-center text-[10px] text-stone-400 tracking-[0.25em] font-light font-mono select-none pointer-events-none z-10 ${
-              hasEntered ? "animate-fade-in-delayed opacity-70" : "opacity-0"
-            }`}
+            className={`fixed bottom-4 left-0 w-full text-center text-[10px] text-stone-400 tracking-[0.25em] font-light font-mono select-none pointer-events-none z-10 ${hasEntered ? "animate-fade-in-delayed opacity-70" : "opacity-0"
+              }`}
           >
             <ScrambleText
               text="@ No Side Here"
@@ -108,7 +108,3 @@ export default function Home() {
     </div>
   );
 }
-
-
-
-

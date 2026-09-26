@@ -25,9 +25,8 @@ export default function IntroModal({ isOpen, onClose, onStartExperience }: Intro
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 select-none transition-opacity duration-500 ease-out ${
-        isClosing ? "opacity-0 pointer-events-none" : "opacity-100 animate-fade-in"
-      }`}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 select-none transition-opacity duration-500 ease-out ${isClosing ? "opacity-0 pointer-events-none" : "opacity-100 animate-fade-in"
+        }`}
     >
       <div className="bg-[#fafaf9] border border-stone-200 p-8 max-w-md w-full text-center relative shadow-lg">
         {/* Title */}
