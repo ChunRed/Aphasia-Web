@@ -3,23 +3,201 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Main Page</title>
+	<title>Server Monitor - Aphasia</title>
 	<!-- Tailwind CSS CDN -->
 	<script src="https://cdn.tailwindcss.com"></script>
 	<!-- Socket.IO Client -->
 	<script src="/socket.io/socket.io.js"></script>
+	<style>
+		@keyframes slideDown {
+			from {
+				opacity: 0;
+				transform: translateY(-8px);
+			}
+			to {
+				opacity: 1;
+				transform: translateY(0);
+			}
+		}
+		.animate-slide-down {
+			animation: slideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+		}
+	</style>
 </head>
-<body class="min-h-screen bg-white text-black flex items-center justify-center font-sans">
-	<main class="text-center">
-		<h1 class="text-2xl font-normal tracking-wide">main page</h1>
-	</main>
+<body class="min-h-screen bg-[#fafaf9] text-stone-800 font-sans antialiased p-4 sm:p-8 flex flex-col items-center">
+	<div class="w-full max-w-3xl flex flex-col gap-6">
+
+		<!-- Top Header: Title & Online Count Status -->
+		<header class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+			<div>
+				<h1 class="text-xl sm:text-2xl font-light tracking-wider text-stone-900">
+					Aphasia Server Monitor
+				</h1>
+				<p class="text-xs text-stone-400 font-mono tracking-widest mt-1">
+					SOCKET.IO REAL-TIME LOGS
+				</p>
+			</div>
+
+			<!-- Online Count Badge -->
+			<div class="flex items-center gap-3 bg-stone-50 border border-stone-200/60 rounded-xl px-4 py-2.5">
+				<div class="relative flex items-center justify-center">
+					<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping absolute"></span>
+					<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 relative"></span>
+				</div>
+				<div class="text-xs font-mono text-stone-600">
+					目前連線人數：
+					<span id="onlineCount" class="font-bold text-base text-stone-900 ml-1">0</span>
+					<span class="text-stone-400 ml-0.5">人</span>
+				</div>
+			</div>
+		</header>
+
+		<!-- Main Log List Section -->
+		<main class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col gap-4">
+			<div class="flex items-center justify-between border-b border-stone-100 pb-3">
+				<div class="flex items-center gap-2">
+					<h2 class="text-sm font-medium tracking-wide text-stone-700">
+						最新訊息紀錄 (最新 20 則)
+					</h2>
+					<span id="logCounter" class="text-[11px] font-mono px-2 py-0.5 bg-stone-100 text-stone-500 rounded-full">
+						0 / 20
+					</span>
+				</div>
+				<span class="text-[11px] text-stone-400 font-mono">
+					格式：uuid : text
+				</span>
+			</div>
+
+			<!-- Message List Container -->
+			<ul id="logList" class="flex flex-col gap-2.5 min-h-[160px] max-h-[600px] overflow-y-auto pr-1">
+				<li id="emptyState" class="py-12 text-center text-xs text-stone-400 font-light tracking-widest">
+					尚無收到任何 submit_text 訊息，等待客戶端傳送中...
+				</li>
+			</ul>
+		</main>
+
+		<!-- Footer -->
+		<footer class="text-center text-[11px] text-stone-400 font-mono tracking-widest py-2">
+			UUID PERSISTENT SOCKET MONITOR
+		</footer>
+	</div>
 
 	<script>
-		// 初始化 Socket.IO 連線
-		const socket = io();
+		// 1. 生成或讀取 localStorage 中的 UUID
+		function getOrCreateUUID() {
+			const KEY = 'aphasia_user_uuid';
+			let id = null;
+			try {
+				id = localStorage.getItem(KEY);
+				if (!id) {
+					if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+						id = crypto.randomUUID();
+					} else {
+						id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+							var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+							return v.toString(16);
+						});
+					}
+					localStorage.setItem(KEY, id);
+				}
+			} catch (e) {
+				id = 'temp-' + Math.random().toString(36).substring(2, 11);
+			}
+			return id;
+		}
+
+		const userUUID = getOrCreateUUID();
+
+		// 2. DOM 元素參考
+		const onlineCountEl = document.getElementById('onlineCount');
+		const logListEl = document.getElementById('logList');
+		const emptyStateEl = document.getElementById('emptyState');
+		const logCounterEl = document.getElementById('logCounter');
+
+		// 內存中的最新 20 則訊息
+		let logs = [];
+		const MAX_LOGS = 20;
+
+		// 輔助防 XSS 跳脫
+		function escapeHtml(text) {
+			const div = document.createElement('div');
+			div.textContent = text || '';
+			return div.innerHTML;
+		}
+
+		// 渲染整個訊息清單
+		function renderLogs() {
+			if (logs.length === 0) {
+				logListEl.innerHTML = `
+					<li id="emptyState" class="py-12 text-center text-xs text-stone-400 font-light tracking-widest">
+						尚無收到任何 submit_text 訊息，等待客戶端傳送中...
+					</li>
+				`;
+				logCounterEl.textContent = '0 / 20';
+				return;
+			}
+
+			logCounterEl.textContent = `${logs.length} / ${MAX_LOGS}`;
+			logListEl.innerHTML = '';
+
+			logs.forEach((item, index) => {
+				const li = document.createElement('li');
+				li.className = 'py-3 px-4 rounded-xl bg-stone-50 border border-stone-200/70 font-mono text-xs text-stone-800 break-words flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2 leading-relaxed' + (index === 0 ? ' animate-slide-down' : '');
+
+				// 依照要求格式：uuid : text
+				li.innerHTML = `
+					<span class="text-stone-500 font-medium shrink-0 select-all">${escapeHtml(item.uuid || 'unknown')}</span>
+					<span class="text-stone-400 font-semibold shrink-0 hidden sm:inline">:</span>
+					<span class="text-stone-800 font-sans flex-1 break-all">${escapeHtml(item.text || '')}</span>
+				`;
+
+				logListEl.appendChild(li);
+			});
+		}
+
+		// 新增單筆訊息
+		function addMessageLog(item) {
+			logs.unshift({
+				uuid: item.uuid || 'unknown',
+				text: item.text || ''
+			});
+			if (logs.length > MAX_LOGS) {
+				logs.pop();
+			}
+			renderLogs();
+		}
+
+		// 3. 連線 Socket.IO 並夾帶 UUID 與 role: 'monitor' (不計入使用者連線人數)
+		const socket = io({
+			query: {
+				uuid: userUUID,
+				role: 'monitor'
+			}
+		});
+
+		// 剛連線時接收伺服器目前的初始狀態 (人數與最新 20 則訊息)
+		socket.on('init_data', (data) => {
+			if (data && typeof data.onlineCount === 'number') {
+				onlineCountEl.textContent = data.onlineCount;
+			}
+			if (data && Array.isArray(data.logs)) {
+				logs = data.logs.slice(0, MAX_LOGS);
+				renderLogs();
+			}
+		});
+
+		// 即時連線人數更新
+		socket.on('online_count', (count) => {
+			onlineCountEl.textContent = count;
+		});
+
+		// 即時接收由 submit_text 觸發的新訊息
+		socket.on('new_message_log', (item) => {
+			addMessageLog(item);
+		});
 
 		socket.on('connect', () => {
-			console.log('[Socket.IO] Connected to server, ID:', socket.id);
+			console.log('[Socket.IO] Connected to server, UUID:', userUUID);
 		});
 
 		socket.on('disconnect', () => {
