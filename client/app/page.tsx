@@ -6,6 +6,7 @@ import IntroModal from "@/components/IntroModal";
 import GateModal from "@/components/GateModal";
 import ScrambleText from "@/components/ScrambleText";
 import { BackgroundWordCloud } from "@/components/word-cloud";
+import SocketTextSender from "@/components/SocketTextSender";
 
 export default function Home() {
   const [isVerifiedAndPassed, setIsVerifiedAndPassed] = useState(false);
@@ -27,6 +28,9 @@ export default function Home() {
 
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-start md:justify-center bg-[#fafaf9] p-6 pt-20 md:pt-6 text-center select-none overflow-hidden">
+      {/* Socket.IO Connection & Status Badge (開發環境預設顯示) */}
+      <SocketTextSender showStatusIndicator={process.env.NODE_ENV === "development"} />
+
       {/* 0. Synchronized Background Word Cloud (Only mounts & animates after IntroModal is confirmed) */}
       <BackgroundWordCloud visible={hasEntered} />
 

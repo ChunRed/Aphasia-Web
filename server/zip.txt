@@ -1,0 +1,2 @@
+# 打包上傳用的 deploy.zip（體積僅約 17KB，排除 node_modules）
+zip -r deploy.zip . -x "node_modules/*" -x ".git/*" -x "*.DS_Store" -x "*__MACOSX*" -x "*.log" -x "zip.txt" -x "deploy*.zip"

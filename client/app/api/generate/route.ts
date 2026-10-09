@@ -1,19 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-// Initialize Supabase client with Service Role Key to bypass RLS in server-side API routes
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
-  "https://zrbolaymgwdcvwwuosbf.supabase.co";
-
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  process.env.SUPABASE_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpyYm9sYXltZ3dkY3Z3d3Vvc2JmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NDQ1Mzk2MCwiZXhwIjoyMTAwMDI5OTYwfQ.2-eIrx08xc8buAf0LLd3_hxq0shx4yb8XgI3CjLHPm4";
-
-const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function POST(request: NextRequest) {
   try {
@@ -79,34 +64,11 @@ export async function POST(request: NextRequest) {
 
     const clientIp = rawIp.replace(/^.*:/, "") || rawIp;
 
-    // 6. Insert data into Supabase '2026DAF' table
-    const { data: dbData, error: dbError } = await supabase
-      .from("2026DAF")
-      .insert([
-        {
-          IP: clientIp,
-          Text: trimmedText,
-        },
-      ])
-      .select();
-
-    if (dbError) {
-      console.error("Supabase insert error:", dbError);
-      return NextResponse.json(
-        {
-          success: false,
-          message: `資料庫寫入失敗: ${dbError.message}`,
-        },
-        { status: 500 }
-      );
-    }
-
-    // TODO: 這裡之後要寫呼叫 AI 還有透過 Webhook/Socket 傳給現場 Local Server 的控制程式碼
     return NextResponse.json(
       {
         success: true,
-        message: "文字傳送成功並已寫入資料庫",
-        data: dbData ? dbData[0] : { IP: clientIp, Text: trimmedText },
+        message: "文字傳送成功",
+        data: { IP: clientIp, Text: trimmedText },
       },
       { status: 200 }
     );

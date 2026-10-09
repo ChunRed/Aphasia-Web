@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Turnstile } from "@marsstrikes/react-turnstile";
 import ScrambleText from "@/components/ScrambleText";
+import { useSocketTextSender } from "@/components/SocketTextSender";
 
 interface MujiInputProps {
   isVisible?: boolean;
@@ -13,6 +14,7 @@ export default function MujiInput({
   isVisible = true,
   turnstileToken: propToken = "",
 }: MujiInputProps) {
+  const { sendText: sendSocketText, serverUrl: socketServerUrl } = useSocketTextSender();
   const [text, setText] = useState("");
   const [token, setToken] = useState(propToken);
   const [loading, setLoading] = useState(false);
@@ -73,6 +75,14 @@ export default function MujiInput({
       const data = await res.json();
 
       if (res.ok && data.success) {
+        // 透過 Socket.IO 發送符合字數規範的文字至 server 端
+        try {
+          await sendSocketText(text.trim());
+          console.log(`[MujiInput] Text successfully sent to socket server: ${socketServerUrl}`);
+        } catch (socketErr) {
+          console.warn("[MujiInput] Socket send warning:", socketErr);
+        }
+
         setModal({
           show: true,
           isSuccess: true,
