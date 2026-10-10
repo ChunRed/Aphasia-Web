@@ -1,9 +1,11 @@
 import * as THREE from "three";
-import { createTextSprite, TextSpriteResult } from "./createTextSprite";
+import { createTextSprite, calculateStringBits, TextSpriteResult } from "./createTextSprite";
 
 export interface NodeData {
   id: number;
   label: string;
+  textIndex: number;       // 該文字在標籤清單中的 index 數 (0, 1, 2, ...)
+  bits: number;            // 該文字計算所得之 UTF-8 位元數 (bits)
   basePos: THREE.Vector3;
   currentPos: THREE.Vector3;
   startPos: THREE.Vector3;  // 當前拍起始位置
@@ -41,6 +43,11 @@ export interface FloatingTextNetworkOptions {
   fontSize?: number;
   /** 整體初始空間分佈半徑 / 飄散基準範圍（預設 1.5） */
   spreadRadius?: number;
+
+  /** 是否在文字下方顯示 index 數與 bits 位元數（預設 true） */
+  showBitsInfo?: boolean;
+  /** 下方 index 與 bits 小字字級縮放比例（預設 0.42） */
+  subTextRatio?: number;
 
   // --- 階層式節奏與彈簧物理參數 ---
   /** 基本打拍間隔（秒 / 拍）：預設 0.39 秒 */
@@ -129,6 +136,8 @@ export function createFloatingTextNetwork(
     textScale = 0.46,
     fontSize = 30,
     spreadRadius = 1.5,
+    showBitsInfo = true,
+    subTextRatio = 0.42,
     beatInterval = RHYTHM_CONFIG.BEAT_INTERVAL,
     smallAmp = RHYTHM_CONFIG.SMALL_AMP,
     midAmp = RHYTHM_CONFIG.MID_AMP,
@@ -147,7 +156,11 @@ export function createFloatingTextNetwork(
 
   // 1. 初始化文字節點（以費氏球體均勻分佈在 3D 空間半徑）
   for (let i = 0; i < nodeCount; i++) {
-    const label = labels[i % labels.length];
+    const textIndex = i % labels.length;
+    const label = labels[textIndex];
+    const bits = calculateStringBits(label);
+    const subText = showBitsInfo ? `#${textIndex} · ${bits} bits` : undefined;
+
     const phi = Math.acos(1 - (2 * (i + 0.5)) / nodeCount);
     const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
 
@@ -161,11 +174,13 @@ export function createFloatingTextNetwork(
     const startPos = basePos.clone();
     const targetPos = basePos.clone();
 
-    // 建立文字貼圖 Sprite
+    // 建立文字貼圖 Sprite（主文字 + 下方略小之 index 與 bits）
     const spriteResult = createTextSprite(label, {
       fontSize,
       color: textColor,
       scale: textScale,
+      subText,
+      subTextRatio,
     });
     spriteResult.sprite.position.copy(currentPos);
     group.add(spriteResult.sprite);
@@ -173,6 +188,8 @@ export function createFloatingTextNetwork(
     nodes.push({
       id: i,
       label,
+      textIndex,
+      bits,
       basePos,
       currentPos,
       startPos,

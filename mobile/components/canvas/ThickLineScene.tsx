@@ -12,7 +12,7 @@ export const LINE_CONFIG = {
   stepInterval: 0.05,
 
   /** 形變與翻轉速度倍率：數值越大每次換格的姿態跨度越劇烈，預設 0.35 */
-  morphSpeed: 0.6,
+  morphSpeed: 0.5,
 
   /** 線條寬度（像素）：預設 2.5 */
   lineWidth: 1,

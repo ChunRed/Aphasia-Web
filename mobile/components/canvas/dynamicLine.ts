@@ -43,7 +43,7 @@ export function createDynamicLine(
     t: number
   ): [number, number, number] => {
     // Base radius with multi-frequency chaotic harmonic modulation
-    const baseRadius = 1.9;
+    const baseRadius = 5.9;
     const rMod =
       0.48 * Math.sin(2 * theta + 3.2 * t) +
       0.38 * Math.cos(3 * theta - 2.4 * t) +
