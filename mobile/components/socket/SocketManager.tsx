@@ -19,20 +19,38 @@ import io from "socket.io-client";
  *  - 3. 線上正式環境 -> http://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com
  */
 export const getSocketServerUrl = (): string => {
-  if (process.env.NEXT_PUBLIC_SOCKET_SERVER_URL) {
-    return process.env.NEXT_PUBLIC_SOCKET_SERVER_URL;
-  }
+  let url = "";
 
-  if (typeof window !== "undefined") {
+  if (process.env.NEXT_PUBLIC_SOCKET_SERVER_URL) {
+    url = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL;
+  } else if (typeof window !== "undefined") {
     const hostname = window.location.hostname;
     if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://localhost:8080";
+      url = "http://localhost:8080";
+    } else {
+      url = "https://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com";
+    }
+  } else {
+    url =
+      process.env.NODE_ENV === "development"
+        ? "http://localhost:8080"
+        : "https://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com";
+  }
+
+  // 自動安全升級：當前端在 HTTPS 環境（如 Vercel）執行時，
+  // 瀏覽器嚴格禁止連線至非安全的 http / ws 端點（Mixed Content 封鎖）。
+  // 因此若非本地測試 (localhost)，自動將 http:// 升級為 https:// (對應 WebSocket 的 wss://)。
+  if (typeof window !== "undefined" && window.location.protocol === "https:") {
+    if (
+      url.startsWith("http://") &&
+      !url.includes("localhost") &&
+      !url.includes("127.0.0.1")
+    ) {
+      url = url.replace(/^http:\/\//i, "https://");
     }
   }
 
-  return process.env.NODE_ENV === "development"
-    ? "http://localhost:8080"
-    : "http://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com";
+  return url;
 };
 
 /**
@@ -75,12 +93,17 @@ export const getSharedSocket = (): SocketIOClient.Socket => {
   if (!sharedSocket || sharedSocket.disconnected) {
     const targetUrl = getSocketServerUrl();
     const userUUID = getOrCreateUUID();
+    const isSecure =
+      typeof window !== "undefined"
+        ? window.location.protocol === "https:"
+        : targetUrl.startsWith("https:");
 
     sharedSocket = io(targetUrl, {
       query: {
         uuid: userUUID,
         role: "client",
       },
+      secure: isSecure,
       transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionAttempts: Infinity,
