@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { SocketManager } from "@/components/socket/SocketManager";
 import OverlayCenterText from "@/components/ui/OverlayCenterText";
 
 // Dynamically load the Three.js MainCanvas component with SSR disabled
@@ -11,12 +12,14 @@ const MainCanvas = dynamic(
 
 export default function Home() {
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-white">
-      {/* 3D WebGL Canvas Layer (Thick Line + Connected Floating Text Nodes) */}
-      <MainCanvas />
+    <SocketManager>
+      <main className="relative w-screen h-screen overflow-hidden bg-white">
+        {/* 3D WebGL Canvas Layer (Thick Line + Connected Floating Text Nodes) */}
+        <MainCanvas />
 
-      {/* UI Overlay Layer */}
-      <OverlayCenterText />
-    </main>
+        {/* UI Overlay Layer */}
+        <OverlayCenterText />
+      </main>
+    </SocketManager>
   );
 }

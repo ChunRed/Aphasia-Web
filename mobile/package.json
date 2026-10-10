@@ -9,9 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@types/socket.io-client": "^1.4.36",
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "socket.io-client": "^2.5.0",
     "three": "^0.174.0"
   },
   "devDependencies": {
