@@ -4,6 +4,17 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import io from "socket.io-client";
 
 /**
+ * 訊息記錄資料結構規格 (MessageLog)
+ */
+export interface MessageLog {
+  id: string;          // 該筆訊息的唯一 ID (可用 uuid 或 nanoid 生成)
+  userId: string;      // 傳送者的 UUID
+  originalText: string;// 觀眾輸入的完整日記內容 (>= 10 字)
+  keywords: string[];  // Gemini API 分析出的 3~5 個關鍵字
+  timestamp: number;   // 建立時間戳記
+}
+
+/**
  * 自動判定 Socket.IO Server 連線位址
  * 1. 優先使用環境變數 NEXT_PUBLIC_SOCKET_SERVER_URL
  * 2. 本機環境 (localhost / 127.0.0.1) -> http://localhost:8080
@@ -27,7 +38,7 @@ export const getSocketServerUrl = (): string => {
 };
 
 /**
- * 取得或生成手機/瀏覽器專屬的持久性 UUID
+ * 取得或生成手機/瀏覽器專屬的持久性 UUID (userId)
  * 優先讀取 localStorage，若不存在則生成並寫入
  */
 export const getOrCreateUUID = (): string => {
@@ -69,7 +80,8 @@ export const getSharedSocket = (): SocketIOClient.Socket => {
 
     sharedSocket = io(targetUrl, {
       query: {
-        uuid: userUUID,
+        userId: userUUID,
+        uuid: userUUID, // 相容舊參數
         role: "client",
       },
       transports: ["websocket", "polling"],
@@ -83,14 +95,14 @@ export const getSharedSocket = (): SocketIOClient.Socket => {
 };
 
 export interface SocketTextSenderProps {
-  onSendSuccess?: (data: { uuid: string; text: string }) => void;
+  onSendSuccess?: (data: { userId: string; text: string; id?: string }) => void;
   onSendError?: (error: string) => void;
   showStatusIndicator?: boolean;
 }
 
 /**
  * 元件：SocketTextSender
- * 負責維護與 Socket.IO 伺服器的連線，並將 localStorage 的 UUID 回傳給 Server
+ * 負責維護與 Socket.IO 伺服器的連線，並將 localStorage 的 UUID / userId 回傳給 Server
  */
 export function SocketTextSender({
   onSendSuccess,
@@ -114,7 +126,7 @@ export function SocketTextSender({
     setIsConnected(socket.connected);
 
     const onConnect = () => {
-      console.log(`[SocketTextSender] 連線成功: ${targetUrl} (UUID: ${userUUID})`);
+      console.log(`[SocketTextSender] 連線成功: ${targetUrl} (User ID: ${userUUID})`);
       setIsConnected(true);
     };
 
@@ -139,9 +151,9 @@ export function SocketTextSender({
     };
   }, []);
 
-  // 傳送文字方法（嚴格驗證 10 - 200 字限制）
+  // 傳送文字方法（嚴格驗證 10 - 200 字限制，帶入 userId 與 text）
   const sendText = useCallback(
-    (textToSend: string): Promise<{ success: boolean; message: string }> => {
+    (textToSend: string): Promise<{ success: boolean; message: string; id?: string }> => {
       return new Promise((resolve, reject) => {
         const trimmed = textToSend ? textToSend.trim() : "";
         const length = trimmed.length;
@@ -161,17 +173,25 @@ export function SocketTextSender({
         }
 
         const userUUID = uuid || getOrCreateUUID();
+        // 依照規格帶上 userId: string, text: string，並附加相容欄位
         const payload = {
-          uuid: userUUID,
+          userId: userUUID,
           text: trimmed,
+          originalText: trimmed,
+          uuid: userUUID,
         };
 
-        socket.emit("submit_text", payload, (response?: { success?: boolean; message?: string }) => {
+        socket.emit("submit_text", payload, (response?: { success?: boolean; message?: string; id?: string; userId?: string }) => {
           console.log("[SocketTextSender] 伺服器確認收到:", response);
-          onSendSuccess?.(payload);
+          onSendSuccess?.({
+            userId: userUUID,
+            text: trimmed,
+            id: response?.id,
+          });
           resolve({
             success: true,
-            message: response?.message || "文字已成功透過 Socket 傳送至伺服器",
+            id: response?.id,
+            message: response?.message || "文字已成功加入排程佇列",
           });
         });
 
@@ -212,14 +232,14 @@ export function SocketTextSender({
 export function useSocketTextSender() {
   const [isConnected, setIsConnected] = useState(false);
   const [serverUrl, setServerUrl] = useState("");
-  const [userUUID, setUserUUID] = useState("");
+  const [userId, setUserId] = useState("");
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
 
   useEffect(() => {
     const targetUrl = getSocketServerUrl();
     const id = getOrCreateUUID();
     setServerUrl(targetUrl);
-    setUserUUID(id);
+    setUserId(id);
 
     // 取得全域共享的單一 Socket 實例
     const socket = getSharedSocket();
@@ -228,7 +248,7 @@ export function useSocketTextSender() {
 
     const onConnect = () => {
       setIsConnected(true);
-      console.log(`[useSocketTextSender] 已連線至: ${targetUrl} (UUID: ${id})`);
+      console.log(`[useSocketTextSender] 已連線至: ${targetUrl} (User ID: ${id})`);
     };
 
     const onDisconnect = () => {
@@ -245,7 +265,7 @@ export function useSocketTextSender() {
   }, []);
 
   const sendText = useCallback(
-    (textToSend: string): Promise<{ success: boolean; message: string }> => {
+    (textToSend: string): Promise<{ success: boolean; message: string; id?: string }> => {
       return new Promise((resolve, reject) => {
         const trimmed = textToSend ? textToSend.trim() : "";
         const length = trimmed.length;
@@ -262,14 +282,20 @@ export function useSocketTextSender() {
           return reject(new Error(`伺服器尚未連線 (${serverUrl})`));
         }
 
-        const currentId = userUUID || getOrCreateUUID();
+        const currentId = userId || getOrCreateUUID();
         const payload = {
-          uuid: currentId,
+          userId: currentId,
           text: trimmed,
+          originalText: trimmed,
+          uuid: currentId,
         };
 
-        socket.emit("submit_text", payload, () => {
-          resolve({ success: true, message: "文字已成功透過 Socket 送出" });
+        socket.emit("submit_text", payload, (response?: { success?: boolean; message?: string; id?: string }) => {
+          resolve({
+            success: true,
+            id: response?.id,
+            message: response?.message || "文字已成功加入排程佇列",
+          });
         });
 
         setTimeout(() => {
@@ -277,10 +303,10 @@ export function useSocketTextSender() {
         }, 1200);
       });
     },
-    [serverUrl, userUUID]
+    [serverUrl, userId]
   );
 
-  return { isConnected, serverUrl, sendText, userUUID };
+  return { isConnected, serverUrl, sendText, userId, userUUID: userId };
 }
 
 export default SocketTextSender;

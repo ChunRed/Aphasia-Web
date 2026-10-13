@@ -14,6 +14,7 @@
 	"nodemonConfig": {
 		"watch": [
 			"server.js",
+			"systemInstruction.js",
 			"page.html"
 		],
 		"ignore": [
@@ -21,6 +22,9 @@
 		]
 	},
 	"dependencies": {
+		"@google/genai": "^2.29.0",
+		"@google/generative-ai": "^0.24.1",
+		"dotenv": "^18.0.7",
 		"express": "^4.22.3",
 		"socket.io": "^2.4.1"
 	},

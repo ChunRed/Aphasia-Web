@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Server Monitor - Aphasia</title>
+	<title>Server Monitor - Aphasia (Gemini Queue)</title>
 	<!-- Tailwind CSS CDN -->
 	<script src="https://cdn.tailwindcss.com"></script>
 	<!-- Socket.IO Client -->
@@ -25,60 +25,79 @@
 	</style>
 </head>
 <body class="min-h-screen bg-[#fafaf9] text-stone-800 font-sans antialiased p-4 sm:p-8 flex flex-col items-center">
-	<div class="w-full max-w-3xl flex flex-col gap-6">
+	<div class="w-full max-w-4xl flex flex-col gap-6">
 
-		<!-- Top Header: Title & Online Count Status -->
-		<header class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+		<!-- Top Header: Title & Badges -->
+		<header class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
 			<div>
 				<h1 class="text-xl sm:text-2xl font-light tracking-wider text-stone-900">
 					那些字已經無關緊要了
 				</h1>
-				<p class="text-xs text-stone-400 font-mono tracking-widest mt-1">
-					SOCKET.IO REAL-TIME LOGS
-				</p>
+				<div class="flex items-center gap-2 mt-1">
+					<p class="text-xs text-stone-400 font-mono tracking-widest">
+						SOCKET.IO & GEMINI 3.1 FLASH LITE REAL-TIME PIPELINE
+					</p>
+				</div>
 			</div>
 
-			<!-- Online Count Badge -->
-			<div class="flex items-center gap-3 bg-stone-50 border border-stone-200/60 rounded-xl px-4 py-2.5">
-				<div class="relative flex items-center justify-center">
-					<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping absolute"></span>
-					<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 relative"></span>
+			<!-- Status Badges Container -->
+			<div class="flex flex-wrap items-center gap-3">
+				<!-- Online Count Badge -->
+				<div class="flex items-center gap-2.5 bg-stone-50 border border-stone-200/60 rounded-xl px-3.5 py-2">
+					<div class="relative flex items-center justify-center">
+						<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping absolute"></span>
+						<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 relative"></span>
+					</div>
+					<div class="text-xs font-mono text-stone-600">
+						在線人數：
+						<span id="onlineCount" class="font-bold text-sm text-stone-900 ml-0.5">0</span>
+						<span class="text-stone-400">人</span>
+					</div>
 				</div>
-				<div class="text-xs font-mono text-stone-600">
-					目前連線人數：
-					<span id="onlineCount" class="font-bold text-base text-stone-900 ml-1">0</span>
-					<span class="text-stone-400 ml-0.5">人</span>
+
+				<!-- Queue Status Badge (5s Throttling) -->
+				<div class="flex items-center gap-2.5 bg-stone-50 border border-stone-200/60 rounded-xl px-3.5 py-2">
+					<div class="relative flex items-center justify-center">
+						<span id="queueDotPing" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping absolute hidden"></span>
+						<span id="queueDot" class="w-2.5 h-2.5 rounded-full bg-stone-300 relative"></span>
+					</div>
+					<div class="text-xs font-mono text-stone-600">
+						待處理佇列：
+						<span id="queueCount" class="font-bold text-sm text-stone-900 ml-0.5">0</span>
+						<span class="text-stone-400">筆</span>
+						<span id="queueStatusText" class="text-[10px] ml-1 px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 font-normal">閒置</span>
+					</div>
 				</div>
 			</div>
 		</header>
 
 		<!-- Main Log List Section -->
 		<main class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col gap-4">
-			<div class="flex items-center justify-between border-b border-stone-100 pb-3">
+			<div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-100 pb-3 gap-2">
 				<div class="flex items-center gap-2">
 					<h2 class="text-sm font-medium tracking-wide text-stone-700">
-						最新訊息紀錄 (最新 20 則)
+						已分析訊息記錄 (最新 20 則，每 5 秒派發)
 					</h2>
 					<span id="logCounter" class="text-[11px] font-mono px-2 py-0.5 bg-stone-100 text-stone-500 rounded-full">
 						0 / 20
 					</span>
 				</div>
 				<span class="text-[11px] text-stone-400 font-mono">
-					格式：uuid : text
+					AI 標籤 · 佇列 FIFO
 				</span>
 			</div>
 
 			<!-- Message List Container -->
-			<ul id="logList" class="flex flex-col gap-2.5 min-h-[160px] max-h-[600px] overflow-y-auto pr-1">
-				<li id="emptyState" class="py-12 text-center text-xs text-stone-400 font-light tracking-widest">
-					尚無收到任何 submit_text 訊息，等待客戶端傳送中...
+			<ul id="logList" class="flex flex-col gap-3 min-h-[160px] max-h-[640px] overflow-y-auto pr-1">
+				<li id="emptyState" class="py-16 text-center text-xs text-stone-400 font-light tracking-widest">
+					尚無處理完成之日記訊息，等待客戶端傳送並排程分析中...
 				</li>
 			</ul>
 		</main>
 
 		<!-- Footer -->
 		<footer class="text-center text-[11px] text-stone-400 font-mono tracking-widest py-2">
-			UUID PERSISTENT SOCKET MONITOR
+			GEMINI 3.1 FLASH LITE · 5-SEC THROTTLING QUEUE · REAL-TIME DISPATCHER
 		</footer>
 	</div>
 
@@ -110,8 +129,11 @@
 
 		// 2. DOM 元素參考
 		const onlineCountEl = document.getElementById('onlineCount');
+		const queueCountEl = document.getElementById('queueCount');
+		const queueDotEl = document.getElementById('queueDot');
+		const queueDotPingEl = document.getElementById('queueDotPing');
+		const queueStatusTextEl = document.getElementById('queueStatusText');
 		const logListEl = document.getElementById('logList');
-		const emptyStateEl = document.getElementById('emptyState');
 		const logCounterEl = document.getElementById('logCounter');
 
 		// 內存中的最新 20 則訊息
@@ -125,12 +147,28 @@
 			return div.innerHTML;
 		}
 
+		// 更新佇列 UI
+		function updateQueueUI(pendingCount, isProcessing) {
+			if (queueCountEl) queueCountEl.textContent = pendingCount || 0;
+			if (isProcessing) {
+				queueDotEl.className = 'w-2.5 h-2.5 rounded-full bg-amber-500 relative';
+				queueDotPingEl.classList.remove('hidden');
+				queueStatusTextEl.textContent = '分析中';
+				queueStatusTextEl.className = 'text-[10px] ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium';
+			} else {
+				queueDotEl.className = 'w-2.5 h-2.5 rounded-full bg-stone-300 relative';
+				queueDotPingEl.classList.add('hidden');
+				queueStatusTextEl.textContent = '閒置';
+				queueStatusTextEl.className = 'text-[10px] ml-1 px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 font-normal';
+			}
+		}
+
 		// 渲染整個訊息清單
 		function renderLogs() {
 			if (logs.length === 0) {
 				logListEl.innerHTML = `
-					<li id="emptyState" class="py-12 text-center text-xs text-stone-400 font-light tracking-widest">
-						尚無收到任何 submit_text 訊息，等待客戶端傳送中...
+					<li id="emptyState" class="py-16 text-center text-xs text-stone-400 font-light tracking-widest">
+						尚無處理完成之日記訊息，等待客戶端傳送並排程分析中...
 					</li>
 				`;
 				logCounterEl.textContent = '0 / 20';
@@ -142,13 +180,46 @@
 
 			logs.forEach((item, index) => {
 				const li = document.createElement('li');
-				li.className = 'py-3 px-4 rounded-xl bg-stone-50 border border-stone-200/70 font-mono text-xs text-stone-800 break-words flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2 leading-relaxed' + (index === 0 ? ' animate-slide-down' : '');
+				li.className = 'p-4 rounded-xl bg-stone-50 border border-stone-200/70 font-mono text-xs text-stone-800 break-words flex flex-col gap-2.5 leading-relaxed' + (index === 0 ? ' animate-slide-down' : '');
 
-				// 依照要求格式：uuid : text
+				// 關鍵字標籤渲染
+				const keywords = Array.isArray(item.keywords) ? item.keywords : [];
+				const keywordsHtml = keywords.length > 0
+					? keywords.map(kw => `<span class="px-2 py-0.5 rounded-md bg-stone-900 text-stone-50 font-sans text-xs tracking-wide shadow-sm">${escapeHtml(kw)}</span>`).join(' ')
+					: '<span class="text-stone-400 italic text-[11px]">無關鍵字</span>';
+
+				const timeStr = item.timestamp
+					? new Date(item.timestamp).toLocaleTimeString()
+					: '';
+
+				const statusBadge = item.status === 'fallback'
+					? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-600 text-[10px]">Fallback</span>`
+					: `<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px]">AI OK</span>`;
+
 				li.innerHTML = `
-					<span class="text-stone-500 font-medium shrink-0 select-all">${escapeHtml(item.uuid || 'unknown')}</span>
-					<span class="text-stone-400 font-semibold shrink-0 hidden sm:inline">:</span>
-					<span class="text-stone-800 font-sans flex-1 break-all">${escapeHtml(item.text || '')}</span>
+					<!-- Top Meta Row -->
+					<div class="flex items-center justify-between text-[11px] text-stone-400 border-b border-stone-200/50 pb-1.5">
+						<div class="flex items-center gap-2">
+							<span class="text-stone-400 font-mono text-[10px]">USER:</span>
+							<span class="text-stone-700 font-medium font-mono select-all">${escapeHtml((item.userId || item.uuid || 'unknown').slice(0, 18))}</span>
+							${item.id ? `<span class="text-stone-400 font-mono text-[10px]">[${escapeHtml(item.id.slice(0, 12))}]</span>` : ''}
+						</div>
+						<div class="flex items-center gap-2">
+							${statusBadge}
+							<span class="font-mono text-[10px]">${timeStr}</span>
+						</div>
+					</div>
+
+					<!-- Diary Text Body -->
+					<div class="text-stone-800 font-sans text-sm leading-relaxed pl-1 border-l-2 border-stone-300">
+						${escapeHtml(item.originalText || item.text || '')}
+					</div>
+
+					<!-- Extracted Keywords Tags -->
+					<div class="flex flex-wrap items-center gap-1.5 pt-1">
+						<span class="text-[10px] text-stone-400 font-mono uppercase tracking-wider mr-1">KEYWORDS:</span>
+						${keywordsHtml}
+					</div>
 				`;
 
 				logListEl.appendChild(li);
@@ -158,8 +229,14 @@
 		// 新增單筆訊息
 		function addMessageLog(item) {
 			logs.unshift({
-				uuid: item.uuid || 'unknown',
-				text: item.text || ''
+				id: item.id || '',
+				userId: item.userId || item.uuid || 'unknown',
+				uuid: item.userId || item.uuid || 'unknown',
+				originalText: item.originalText || item.text || '',
+				text: item.originalText || item.text || '',
+				keywords: item.keywords || [],
+				timestamp: item.timestamp || Date.now(),
+				status: item.status || 'success'
 			});
 			if (logs.length > MAX_LOGS) {
 				logs.pop();
@@ -175,7 +252,7 @@
 			}
 		});
 
-		// 剛連線時接收伺服器目前的初始狀態 (人數與最新 20 則訊息)
+		// 剛連線時接收伺服器目前的初始狀態 (人數、最新 20 則訊息、佇列長度)
 		socket.on('init_data', (data) => {
 			if (data && typeof data.onlineCount === 'number') {
 				onlineCountEl.textContent = data.onlineCount;
@@ -184,6 +261,9 @@
 				logs = data.logs.slice(0, MAX_LOGS);
 				renderLogs();
 			}
+			if (data) {
+				updateQueueUI(data.queueLength || 0, data.isProcessing || false);
+			}
 		});
 
 		// 即時連線人數更新
@@ -191,17 +271,32 @@
 			onlineCountEl.textContent = count;
 		});
 
-		// 即時接收由 submit_text 觸發的新訊息
-		socket.on('new_message_log', (item) => {
+		// 即時佇列狀態更新
+		socket.on('queue_status', (status) => {
+			if (status) {
+				updateQueueUI(status.pendingCount || 0, status.isProcessing || false);
+			}
+		});
+
+		// 即時接收新分析完畢的訊息
+		socket.on('new_processed_entry', (item) => {
 			addMessageLog(item);
 		});
 
+		// 相容舊事件（若未發送 new_processed_entry）
+		socket.on('new_message_log', (item) => {
+			// 若已透過 new_processed_entry 加入則避免重複
+			if (!logs.some(l => l.id && item.id && l.id === item.id)) {
+				addMessageLog(item);
+			}
+		});
+
 		socket.on('connect', () => {
-			console.log('[Socket.IO] Connected to server, UUID:', userUUID);
+			console.log('[Socket.IO] Monitor connected, UUID:', userUUID);
 		});
 
 		socket.on('disconnect', () => {
-			console.log('[Socket.IO] Disconnected from server');
+			console.log('[Socket.IO] Monitor disconnected');
 		});
 	</script>
 </body>
