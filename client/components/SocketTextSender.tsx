@@ -306,7 +306,75 @@ export function useSocketTextSender() {
     [serverUrl, userId]
   );
 
-  return { isConnected, serverUrl, sendText, userId, userUUID: userId };
+  // 專門發送 SUBMIT_DIARY 事件至 Server 端排程佇列
+  const submitDiary = useCallback(
+    (textToSend: string): Promise<{ success: boolean; message: string; id?: string }> => {
+      return new Promise((resolve, reject) => {
+        const trimmed = textToSend ? textToSend.trim() : "";
+        const length = trimmed.length;
+
+        if (length < 10 || length > 200) {
+          return reject(new Error(`字數限制為 10 - 200 字 (目前輸入：${length} 字)`));
+        }
+
+        const socket = socketRef.current || getSharedSocket();
+        if (!socket || !socket.connected) {
+          return reject(new Error(`伺服器尚未連線 (${serverUrl})`));
+        }
+
+        const currentId = userId || getOrCreateUUID();
+        const payload = {
+          userId: currentId,
+          text: trimmed,
+          originalText: trimmed,
+          uuid: currentId,
+        };
+
+        // 發送 SUBMIT_DIARY 事件至伺服器
+        socket.emit("SUBMIT_DIARY", payload, (response?: { success?: boolean; message?: string; id?: string }) => {
+          resolve({
+            success: true,
+            id: response?.id,
+            message: response?.message || "已加入排程佇列，等待分析處理",
+          });
+        });
+
+        setTimeout(() => {
+          resolve({ success: true, message: "已送出至伺服器排程佇列" });
+        }, 1500);
+      });
+    },
+    [serverUrl, userId]
+  );
+
+  // 監聽特定使用者的 DIARY_SUCCESS 通知
+  const onDiarySuccess = useCallback((callback: (data: MessageLog & { message?: string }) => void) => {
+    const socket = socketRef.current || getSharedSocket();
+    socket.on("DIARY_SUCCESS", callback);
+    return () => {
+      socket.off("DIARY_SUCCESS", callback);
+    };
+  }, []);
+
+  // 監聽特定使用者的 DIARY_ERROR 通知
+  const onDiaryError = useCallback((callback: (err: { message: string; code?: string; id?: string; error?: string }) => void) => {
+    const socket = socketRef.current || getSharedSocket();
+    socket.on("DIARY_ERROR", callback);
+    return () => {
+      socket.off("DIARY_ERROR", callback);
+    };
+  }, []);
+
+  return {
+    isConnected,
+    serverUrl,
+    sendText,
+    submitDiary,
+    onDiarySuccess,
+    onDiaryError,
+    userId,
+    userUUID: userId,
+  };
 }
 
 export default SocketTextSender;

@@ -27,7 +27,7 @@ console.log(`[Config] Gemini Model: ${GEMINI_MODEL}`);
 if (GEMINI_API_KEY) {
 	console.log(`[Config] Gemini API Key loaded (prefix: ${GEMINI_API_KEY.slice(0, 8)}...)`);
 } else {
-	console.warn('[Config] ⚠️ 未偵測到 GEMINI_API_KEY，將啟用 Fallback 模式');
+	console.warn('[Config] [WARN] 未偵測到 GEMINI_API_KEY，將啟用 Fallback 模式');
 }
 
 // 2. 引入 System Instruction（社交媒體演算法推薦規則）
@@ -221,40 +221,84 @@ async function processQueue() {
 	const currentItem = pendingQueue.shift();
 	broadcastQueueStatus();
 
-	console.log(`[Queue] 取出訊息進行分析 (ID: ${currentItem.id}, User: ${currentItem.userId}, 剩餘待處理: ${pendingQueue.length})`);
+	console.log(`[Queue] 取出訊息進行分析 (ID: ${currentItem.id}, User: ${currentItem.userId}, Socket: ${currentItem.socketId}, 剩餘待處理: ${pendingQueue.length})`);
 
-	let analysisResult = { keywords: ['無效', '無效', '無效'], isFallback: true };
+	let analysisResult = null;
+	let hasError = false;
+
 	try {
 		analysisResult = await analyzeWithGemini(currentItem.originalText);
+		if (analysisResult.isFallback) {
+			hasError = true;
+		}
 	} catch (err) {
-		console.error(`[Queue] 處理項目 ${currentItem.id} 時發生非預期錯誤:`, err);
+		console.error(`[Queue] 處理項目 ${currentItem.id} 時發生錯誤:`, err);
+		analysisResult = { keywords: ['無效', '無效', '無效'], isFallback: true };
+		hasError = true;
 	}
 
-	// 組裝完整的 MessageLog 物件（包含 ID、userId、originalText、keywords、timestamp）
-	const processedEntry = {
-		id: currentItem.id,
-		userId: currentItem.userId,
-		originalText: currentItem.originalText,
-		keywords: analysisResult.keywords,
-		timestamp: Date.now(),
-		// 向下相容欄位
-		uuid: currentItem.userId,
-		text: currentItem.originalText,
-		status: analysisResult.isFallback ? 'fallback' : 'success',
-	};
+	if (!hasError && analysisResult && Array.isArray(analysisResult.keywords)) {
+		// --- 成功：組裝標準 MessageLog 並存入記憶體 ---
+		const processedEntry = {
+			id: currentItem.id,
+			userId: currentItem.userId,
+			originalText: currentItem.originalText,
+			keywords: analysisResult.keywords,
+			timestamp: Date.now(),
+			// 向下相容欄位
+			uuid: currentItem.userId,
+			text: currentItem.originalText,
+			status: 'success',
+		};
 
-	console.log(`[Queue] 分析完成: User ${processedEntry.userId} -> [${processedEntry.keywords.join(', ')}] (Status: ${processedEntry.status})`);
+		console.log(`[Queue] 分析成功: User ${processedEntry.userId} -> [${processedEntry.keywords.join(', ')}]`);
 
-	// 存入記憶體陣列（維護最新 20 則，超過則先進先出 FIFO）
-	messageLogs.unshift(processedEntry);
-	if (messageLogs.length > MAX_LOGS) {
-		messageLogs.pop();
+		// 存入記憶體陣列（維護最新 20 則，超過則先進先出 FIFO）
+		messageLogs.unshift(processedEntry);
+		if (messageLogs.length > MAX_LOGS) {
+			messageLogs.pop();
+		}
+
+		// 廣播給所有連線客戶端（展示端、監控面板等）
+		io.emit('new_processed_entry', processedEntry);
+		io.emit('new_text', processedEntry);
+		io.emit('new_message_log', processedEntry);
+
+		// 精準定向通知該傳送者 Socket：DIARY_SUCCESS
+		const successPayload = {
+			id: processedEntry.id,
+			userId: processedEntry.userId,
+			originalText: processedEntry.originalText,
+			keywords: processedEntry.keywords,
+			timestamp: processedEntry.timestamp,
+			message: '關鍵字分析完成',
+		};
+
+		if (currentItem.socketId) {
+			io.to(currentItem.socketId).emit('DIARY_SUCCESS', successPayload);
+		}
+		if (currentItem.userId) {
+			io.to(currentItem.userId).emit('DIARY_SUCCESS', successPayload);
+		}
+	} else {
+		// --- 失敗（API 報錯、逾時或格式錯誤）：精準定向回傳 DIARY_ERROR ---
+		console.warn(`[Queue] 分析失敗: User ${currentItem.userId} (ID: ${currentItem.id})，發送 DIARY_ERROR`);
+
+		const errorPayload = {
+			id: currentItem.id,
+			userId: currentItem.userId,
+			message: '分析失敗，請再次輸入',
+			code: 'ANALYSIS_FAILED',
+			error: 'Gemini API 處理逾時或回傳格式不正確',
+		};
+
+		if (currentItem.socketId) {
+			io.to(currentItem.socketId).emit('DIARY_ERROR', errorPayload);
+		}
+		if (currentItem.userId) {
+			io.to(currentItem.userId).emit('DIARY_ERROR', errorPayload);
+		}
 	}
-
-	// 廣播資料物件給所有連線客戶端（包括展示端與監控端）
-	io.emit('new_processed_entry', processedEntry);
-	io.emit('new_text', processedEntry); // 相容既有監聽 new_text
-	io.emit('new_message_log', processedEntry); // 相容既有監聽 new_message_log
 
 	// 遞迴延遲 5 秒後進行下一筆處理，確保前一次完成後再計算間隔
 	setTimeout(() => {
@@ -277,10 +321,13 @@ io.on('connection', (socket) => {
 	socket.userId = clientUserId;
 	socket.userUUID = clientUserId; // 保留相容性
 
+	// 讓該 socket 加入以 userId 為名的 room，方便精準定向
+	socket.join(clientUserId);
+
 	if (socket.isMonitor) {
 		console.log(`[Socket.IO] Monitor dashboard connected: ${clientUserId}`);
 	} else {
-		console.log(`[Socket.IO] Client connected: ${clientUserId}`);
+		console.log(`[Socket.IO] Client connected: ${clientUserId} (Socket ID: ${socket.id})`);
 	}
 
 	// 廣播連線人數
@@ -294,8 +341,8 @@ io.on('connection', (socket) => {
 		isProcessing: isQueueProcessing,
 	});
 
-	// 接收來自 Input Client 的文字：先推進待處理佇列
-	socket.on('submit_text', (data, callback) => {
+	// 通用處理函式：接收日記文字並入列
+	const handleDiarySubmission = (data, callback) => {
 		// 1. 取得 userId：優先取 payload 的 userId / uuid，若無則 fallback 到 socket 綁定值，最外層補上伺服器端自動生成 UUID
 		const userId =
 			(data && (data.userId || data.uuid)) ||
@@ -312,15 +359,16 @@ io.on('connection', (socket) => {
 		const queueItem = {
 			id: entryId,
 			userId,
+			socketId: socket.id, // 精準記錄傳送者 Socket ID
 			originalText,
 			receivedAt: Date.now(),
 		};
 
-		// 推進待處理佇列（進入 pendingQueue 時保留 userId）
+		// 推進待處理佇列
 		pendingQueue.push(queueItem);
-		console.log(`[Socket.IO] 收到日記文字已入列 (ID: ${entryId}, User: ${userId}, 佇列長度: ${pendingQueue.length})`);
+		console.log(`[Socket.IO] 收到日記文字已入列 (ID: ${entryId}, User: ${userId}, Socket: ${socket.id}, 佇列長度: ${pendingQueue.length})`);
 
-		// 立即確認回傳給 client，表示已成功進入排程佇列
+		// 立即確認回傳給 client，表示已成功進入排程佇列 (Client 進入 PENDING)
 		if (typeof callback === 'function') {
 			callback({
 				success: true,
@@ -335,7 +383,11 @@ io.on('connection', (socket) => {
 
 		// 觸發佇列處理器
 		processQueue();
-	});
+	};
+
+	// 支援 SUBMIT_DIARY 與 submit_text 事件
+	socket.on('SUBMIT_DIARY', handleDiarySubmission);
+	socket.on('submit_text', handleDiarySubmission);
 
 	// 相容一般 message 事件
 	socket.on('message', (data, callback) => {
@@ -371,8 +423,8 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
 	console.log(`===============================================`);
-	console.log(`🚀 Aphasia Server running on http://localhost:${PORT}`);
-	console.log(`🤖 Gemini Model: ${GEMINI_MODEL}`);
-	console.log(`⏱️  Queue Throttling: 1 request / ${THROTTLE_INTERVAL_MS / 1000}s`);
+	console.log(`[Server] Aphasia Server running on http://localhost:${PORT}`);
+	console.log(`[Config] Gemini Model: ${GEMINI_MODEL}`);
+	console.log(`[Queue] Queue Throttling: 1 request / ${THROTTLE_INTERVAL_MS / 1000}s`);
 	console.log(`===============================================`);
 });
