@@ -8,9 +8,9 @@ export interface OverlayCenterTextProps {
   payload?: DispatchPayload | null;
   /** 手動傳入文字（相容舊版本介面） */
   text?: string;
-  /** 打字機速率（毫秒/字元），預設 120ms（三倍慢） */
+  /** 自訂打字機基準速率（毫秒/字元，若未設定則自動使用 100~130ms 隨機有機節奏） */
   typingSpeed?: number;
-  /** 倒退刪除速率（毫秒/字元），預設 105ms（三倍慢） */
+  /** 自訂倒退刪除基準速率（毫秒/字元，若未設定則自動使用 45~75ms 隨機有機節奏） */
   backspaceSpeed?: number;
   /** Step 2 閱讀駐留時間（毫秒），預設 1500ms */
   holdDuration?: number;
@@ -29,6 +29,58 @@ interface MatchRange {
   start: number;
   end: number;
   word: string;
+}
+
+/**
+ * 判定字元是否為標點符號或分隔符（，、。、！、？、、、空格、換行等）
+ */
+const PUNCTUATION_SET = new Set([
+  '，', '、', '。', '！', '？', '…', '—', '～', '：', '；',
+  ',', '.', '!', '?', ';', ':', ' ', '\n', '\t'
+]);
+
+function isPunctuationOrSeparator(char: string): boolean {
+  if (!char) return false;
+  return PUNCTUATION_SET.has(char) || /[\s\p{P}]/u.test(char);
+}
+
+/**
+ * 1. 打字階段動態（Humanized Typing）延遲計算
+ * 基準隨機延遲：每字基準約 100ms ~ 130ms
+ * 隨機浮動：delay = baseDelay + Math.random() * 80 - 40
+ * 標點停頓（Thinking Hesitation）：遇到標點符號額外加入 400ms ~ 650ms 思考停頓
+ */
+function getHumanizedTypingDelay(charJustTyped: string, customBaseSpeed?: number): number {
+  const baseDelay =
+    customBaseSpeed !== undefined ? customBaseSpeed : 100 + Math.random() * 30;
+  let delay = baseDelay + (Math.random() * 80 - 40);
+  delay = Math.max(30, delay);
+
+  if (isPunctuationOrSeparator(charJustTyped)) {
+    const hesitation = 400 + Math.random() * 250;
+    delay += hesitation;
+  }
+
+  return Math.round(delay);
+}
+
+/**
+ * 2. 倒退刪除階段動態（Selective Backspacing）延遲計算
+ * 刪除節奏：每字約 45ms ~ 75ms
+ */
+function getSelectiveBackspacingDelay(customDeleteSpeed?: number): number {
+  if (customDeleteSpeed !== undefined) {
+    return Math.max(20, Math.round(customDeleteSpeed + (Math.random() * 20 - 10)));
+  }
+  return Math.round(45 + Math.random() * 30);
+}
+
+/**
+ * 關鍵字識別停頓（Keyword Hesitation Pause）
+ * 當倒退刪除碰到需要保留的關鍵字時，在此節點短暫停頓 250ms ~ 350ms
+ */
+function getKeywordRecognitionPause(): number {
+  return Math.round(250 + Math.random() * 100);
 }
 
 /**
@@ -104,13 +156,13 @@ function parseTextSegments(text: string, keywords: string[]): TextSegment[] {
 export default function OverlayCenterText({
   payload: propPayload,
   text: propText,
-  typingSpeed = 120,
-  backspaceSpeed = 105,
+  typingSpeed,
+  backspaceSpeed,
   holdDuration = 1500,
   endPauseDuration = 2000,
   defaultText = "[ web view ]",
 }: OverlayCenterTextProps) {
-  const { currentPayload: socketPayload, latestText, reportIdle } = useSocket();
+  const { currentPayload: socketPayload, reportIdle } = useSocket();
 
   // 判定目前生效的 Payload 與文字內容（未被派發到的裝置維持空文字與預設畫面）
   const activePayload = propPayload !== undefined ? propPayload : socketPayload;
@@ -138,7 +190,7 @@ export default function OverlayCenterText({
   }, []);
 
   /**
-   * 執行完整 5 階段視覺演繹狀態機
+   * 執行完整 5 階段視覺演繹狀態機（有機動態節奏）
    */
   const startLifecycle = useCallback(
     (textToPlay: string, keywordsToKeep: string[]) => {
@@ -156,7 +208,7 @@ export default function OverlayCenterText({
       console.log(`[OverlayCenterText] 開始演繹生命週期 (Gen: ${currentGen}, 長度: ${textToPlay.length})`);
 
       // ====================================================================
-      // Step 1: 打字印出 (Typing)
+      // Step 1: 打字階段動態 (Humanized Typing - 遞迴 setTimeout)
       // 從左至右逐字吐出 originalText，閃爍游標 _
       // ====================================================================
       setBeforeCursor("");
@@ -168,11 +220,14 @@ export default function OverlayCenterText({
         if (generationRef.current !== currentGen) return;
 
         charIdx++;
+        const charJustTyped = textToPlay[charIdx - 1];
         setBeforeCursor(textToPlay.slice(0, charIdx));
         setAfterCursor("");
 
         if (charIdx < textToPlay.length) {
-          safeTimeout(typeNextChar, typingSpeed);
+          // 基準 100~130ms + 隨機浮動 ±40ms + 標點符號額外思考停頓 400~650ms
+          const nextCharDelay = getHumanizedTypingDelay(charJustTyped, typingSpeed);
+          safeTimeout(typeNextChar, nextCharDelay);
         } else {
           // ==================================================================
           // Step 2: 短暫駐留 (Pause/Hold)
@@ -185,10 +240,12 @@ export default function OverlayCenterText({
         }
       };
 
-      safeTimeout(typeNextChar, typingSpeed);
+      // 啟動第一個字元的打字延遲
+      const initialTypeDelay = Math.round(100 + Math.random() * 30);
+      safeTimeout(typeNextChar, initialTypeDelay);
 
       // ====================================================================
-      // Step 3: 智慧倒退刪除 (Smart Backspace - 核心效果)
+      // Step 3: 智慧倒退刪除階段動態 (Selective Backspacing - 遞迴 setTimeout)
       // 文字游標從字尾往前倒退刪除，遇關鍵字跳過不刪除，非關鍵字逐字退格
       // ====================================================================
       const startSmartBackspace = () => {
@@ -237,7 +294,28 @@ export default function OverlayCenterText({
             setBeforeCursor(currentLeft);
             setAfterCursor(currentRight);
 
-            safeTimeout(backspaceStep, backspaceSpeed);
+            // 判斷下一次刪除的延遲時間
+            let nextDelay = getSelectiveBackspacingDelay(backspaceSpeed);
+
+            // 若當前非關鍵字區塊已剛好被完全清空
+            if (segments[targetIdx].text.length === 0) {
+              // 檢查左側是否還有未刪除的非關鍵字區塊
+              let hasMoreLeftToDelete = false;
+              for (let i = targetIdx - 1; i >= 0; i--) {
+                if (!segments[i].isKeyword && segments[i].text.length > 0) {
+                  hasMoreLeftToDelete = true;
+                  break;
+                }
+              }
+
+              // 若左側還有非關鍵字需刪除，代表此時游標正迎面碰到並跳過位於中間的保留關鍵字
+              // 在此節點短暫停頓 250ms ~ 350ms，做出詞彙被挑選留下的頓挫感
+              if (hasMoreLeftToDelete) {
+                nextDelay = getKeywordRecognitionPause();
+              }
+            }
+
+            safeTimeout(backspaceStep, nextDelay);
           } else {
             // 所有非關鍵字刪除完畢，只剩下被萃取出的關鍵字
             const finalKeywords = segments
@@ -276,7 +354,13 @@ export default function OverlayCenterText({
           }
         };
 
-        safeTimeout(backspaceStep, backspaceSpeed);
+        // 啟動倒退刪除：若句子尾部本身就是關鍵字，初始時就直接碰到關鍵字，先進行短暫頓挫停頓
+        let initialDeleteDelay = getSelectiveBackspacingDelay(backspaceSpeed);
+        if (segments.length > 0 && segments[segments.length - 1].isKeyword) {
+          initialDeleteDelay = getKeywordRecognitionPause();
+        }
+
+        safeTimeout(backspaceStep, initialDeleteDelay);
       };
     },
     [
