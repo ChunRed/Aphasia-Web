@@ -94,8 +94,20 @@ const generateMessageId = () => {
 	return 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
 };
 
-// 輔助函式：呼叫 Gemini API 分析文字（安全解析與型別檢查）
-const GEMINI_TIMEOUT_MS = 10000;
+// 輔助函式：呼叫 Gemini API 分析文字（安全解析與型別檢查，支援 503 尖峰自動退避重試）
+const GEMINI_TIMEOUT_MS = 35000;
+async function callGeminiSingle(text, config) {
+	const timeoutPromise = new Promise((_, reject) =>
+		setTimeout(() => reject(new Error('Gemini API 請求逾時')), GEMINI_TIMEOUT_MS)
+	);
+	const requestPromise = ai.models.generateContent({
+		model: GEMINI_MODEL,
+		contents: text,
+		config,
+	});
+	return await Promise.race([requestPromise, timeoutPromise]);
+}
+
 async function analyzeWithGemini(text) {
 	if (!ai) {
 		console.warn('[Gemini] SDK 尚未初始化，使用預設標籤');
@@ -103,29 +115,35 @@ async function analyzeWithGemini(text) {
 	}
 
 	try {
-		// 加上 Promise.race 進行 10 秒逾時保護
-		const timeoutPromise = new Promise((_, reject) =>
-			setTimeout(() => reject(new Error('Gemini API 請求逾時')), GEMINI_TIMEOUT_MS)
-		);
-
-		let requestPromise = ai.models.generateContent({
-			model: GEMINI_MODEL,
-			contents: text,
-			config: geminiConfig,
-		});
-
-		let response;
-		try {
-			response = await Promise.race([requestPromise, timeoutPromise]);
-		} catch (initialErr) {
-			console.warn(`[Gemini] 初次請求失敗 (${initialErr.message})，嘗試降級設定重試...`);
-			const altConfig = { ...geminiConfig };
-			delete altConfig.thinkingConfig;
-			response = await ai.models.generateContent({
-				model: GEMINI_MODEL,
-				contents: text,
-				config: altConfig,
-			});
+		let response = null;
+		for (let attempt = 1; attempt <= 2; attempt++) {
+			try {
+				response = await callGeminiSingle(text, geminiConfig);
+				break;
+			} catch (err) {
+				const is503 = err.message && (err.message.includes('503') || err.message.includes('high demand'));
+				if (is503 && attempt < 2) {
+					console.warn(`[Gemini] 遇到 503 尖峰流量，等待 1.5 秒後進行重試...`);
+					await new Promise((r) => setTimeout(r, 1500));
+					continue;
+				}
+				console.warn(`[Gemini] 初次請求失敗 (${err.message})，使用降級設定重試...`);
+				const altConfig = { ...geminiConfig };
+				delete altConfig.thinkingConfig;
+				for (let altAttempt = 1; altAttempt <= 2; altAttempt++) {
+					try {
+						response = await callGeminiSingle(text, altConfig);
+						break;
+					} catch (altErr) {
+						if (altAttempt < 2) {
+							await new Promise((r) => setTimeout(r, 1500));
+							continue;
+						}
+						throw altErr;
+					}
+				}
+				break;
+			}
 		}
 
 		const rawText = response && response.text ? response.text.trim() : '';
@@ -191,52 +209,82 @@ const THROTTLE_INTERVAL_MS = 5000; // 5 秒頻率限制 (Throttling)
 const messageLogs = [];
 const MAX_LOGS = 20;
 
-// 5.1 待派發給 mobile 展示端的分析成果佇列 (Dispatch Queue)
-const dispatchQueue = [];
-
-// 記錄所有連線的 mobile 裝置狀態
-// Map<socketId, { socketId: string, deviceId: string, status: 'idle' | 'busy', socket: any }>
-const mobileDevices = new Map();
+// 5.1 展示端多裝置識別與獨佔式輪流派工機制 (Worker Pool / Round-Robin)
+/**
+ * 訊息佇列 (readyMessageQueue)：Gemini 已分析完成、等待被展示的訊息。
+ * 裝置連線池 (devicesMap)：連線中的手機裝置列表。
+ *
+ * interface ConnectedDevice {
+ *   deviceUuid: string;
+ *   socketId: string;
+ *   status: 'idle' | 'busy';
+ *   lastAssignedAt?: number;
+ *   socket: any;
+ * }
+ */
+const readyMessageQueue = [];
+const devicesMap = new Map(); // Map<string, ConnectedDevice> (key: deviceUuid)
+const socketToDeviceUuid = new Map(); // Map<string, string> (key: socketId -> deviceUuid)
 
 /**
- * 嘗試將佇列中的待展示資料派發給指定的 mobile socket
+ * 取得當前所有 idle 裝置中「最久未接單」的 1 台裝置 (Round-Robin / Least-Recently-Assigned)
  */
-function tryDispatchToSocket(socketId) {
-	const dev = mobileDevices.get(socketId);
-	if (!dev || dev.status !== 'idle') return;
-	if (dispatchQueue.length > 0) {
-		const item = dispatchQueue.shift();
+function getNextIdleDevice() {
+	const idleDevices = [];
+	for (const dev of devicesMap.values()) {
+		if (dev.status === 'idle') {
+			idleDevices.push(dev);
+		}
+	}
+	if (idleDevices.length === 0) return null;
+
+	// 排序規則：
+	// 1. 未曾接單者 (lastAssignedAt === 0 或 undefined) 最優先
+	// 2. 其餘依照 lastAssignedAt 由小到大（最久未接單的優先接單）
+	// 3. 次排序依 deviceUuid 字母數字順序穩定排序（確保 1, 2, 3, 4, 5, 6 循序起步）
+	idleDevices.sort((a, b) => {
+		const aTime = a.lastAssignedAt || 0;
+		const bTime = b.lastAssignedAt || 0;
+		if (aTime !== bTime) {
+			return aTime - bTime;
+		}
+		return String(a.deviceUuid).localeCompare(String(b.deviceUuid), undefined, { numeric: true });
+	});
+
+	return idleDevices[0];
+}
+
+/**
+ * 核心獨佔式派發函式 (嚴格精準單發，絕不使用 io.emit 廣播展示內容)
+ */
+function tryDispatchNext() {
+	if (readyMessageQueue.length === 0) return;
+
+	while (readyMessageQueue.length > 0) {
+		const targetDevice = getNextIdleDevice();
+		if (!targetDevice) {
+			// 無任何 idle 裝置可派發，等待裝置回報 DEVICE_IDLE
+			break;
+		}
+
+		const item = readyMessageQueue.shift();
 		const payload = {
 			id: item.id,
 			userId: item.userId,
 			originalText: item.originalText,
 			keywords: item.keywords,
 		};
-		dev.status = 'busy';
-		dev.socket.emit('DISPATCH_PAYLOAD', payload);
-		console.log(`[Dispatcher] 派發訊息給 Mobile ${dev.deviceId} (Msg ID: ${item.id}, 剩餘待派發: ${dispatchQueue.length})`);
-	}
-}
 
-/**
- * 嘗試將待展示資料派發給任何閒置 (idle) 的 mobile 裝置
- */
-function tryDispatchToIdleMobiles() {
-	if (dispatchQueue.length === 0) return;
-	for (const [sId, dev] of mobileDevices.entries()) {
-		if (dev.status === 'idle') {
-			const item = dispatchQueue.shift();
-			const payload = {
-				id: item.id,
-				userId: item.userId,
-				originalText: item.originalText,
-				keywords: item.keywords,
-			};
-			dev.status = 'busy';
-			dev.socket.emit('DISPATCH_PAYLOAD', payload);
-			console.log(`[Dispatcher] 派發訊息給 Mobile ${dev.deviceId} (Msg ID: ${item.id}, 剩餘待派發: ${dispatchQueue.length})`);
-			if (dispatchQueue.length === 0) break;
-		}
+		// 標記該裝置為 busy 並更新派發時間戳記
+		targetDevice.status = 'busy';
+		targetDevice.lastAssignedAt = Date.now();
+
+		// 嚴格獨佔單發，僅發給該裝置的 socketId
+		io.to(targetDevice.socketId).emit('DISPATCH_PAYLOAD', payload);
+
+		const busyCount = Array.from(devicesMap.values()).filter((d) => d.status === 'busy').length;
+		const totalCount = devicesMap.size;
+		console.log(`[Dispatcher] Assigned message to Device [${targetDevice.deviceUuid}] (Busy: ${busyCount}/${totalCount}, Pending Messages: ${readyMessageQueue.length}) [Msg: ${payload.id}]`);
 	}
 }
 
@@ -268,7 +316,7 @@ const broadcastQueueStatus = () => {
 	io.emit('queue_status', {
 		pendingCount: pendingQueue.length,
 		isProcessing: isQueueProcessing,
-		dispatchQueueCount: dispatchQueue.length,
+		dispatchQueueCount: readyMessageQueue.length,
 	});
 };
 
@@ -322,21 +370,20 @@ async function processQueue() {
 			messageLogs.pop();
 		}
 
-		// 存入待展示派發佇列 (Pull/Handshake Dispatch Queue)
-		dispatchQueue.push({
+		// 存入待展示派發佇列 (readyMessageQueue)
+		readyMessageQueue.push({
 			id: processedEntry.id,
 			userId: processedEntry.userId,
 			originalText: processedEntry.originalText,
 			keywords: processedEntry.keywords,
 		});
-		console.log(`[Dispatcher] 新增項目至待派發佇列 (ID: ${processedEntry.id}, 佇列長度: ${dispatchQueue.length})`);
+		console.log(`[Dispatcher] 新增項目至待派發佇列 (ID: ${processedEntry.id}, 佇列長度: ${readyMessageQueue.length})`);
 
-		// 立即嘗試派發給目前處於 idle 的 mobile 展示端
-		tryDispatchToIdleMobiles();
+		// 立即嘗試進行獨佔式派發 (Round-Robin Worker Pool)
+		tryDispatchNext();
 
-		// 廣播給所有連線客戶端（展示端、監控面板等）
+		// 僅通知監控面板（絕不全域廣播 new_text 給展示端，避免污染其他裝置畫面）
 		io.emit('new_processed_entry', processedEntry);
-		io.emit('new_text', processedEntry);
 		io.emit('new_message_log', processedEntry);
 
 		// 精準定向通知該傳送者 Socket：DIARY_SUCCESS
@@ -464,36 +511,67 @@ io.on('connection', (socket) => {
 	socket.on('SUBMIT_DIARY', handleDiarySubmission);
 	socket.on('submit_text', handleDiarySubmission);
 
-	// 支援 Mobile 端的拉取式 (Pull/Handshake) 派工機制
+	// 支援 Mobile 端的獨佔式 (Worker Pool / Round-Robin) 派工機制
 	// 1. Mobile 啟動連線完成，宣告就緒 (DEVICE_READY)
 	socket.on('DEVICE_READY', (data) => {
-		const deviceId = (data && data.deviceId) || socket.userId || socket.id;
-		mobileDevices.set(socket.id, {
+		const devUuid =
+			(data && (data.deviceUuid || data.deviceId)) ||
+			socket.handshake.query.deviceUuid ||
+			socket.handshake.query.deviceId ||
+			socket.userId ||
+			socket.id;
+
+		const existing = devicesMap.get(devUuid);
+		const connectedDevice = {
+			deviceUuid: devUuid,
 			socketId: socket.id,
-			deviceId,
 			status: 'idle',
+			lastAssignedAt: existing ? (existing.lastAssignedAt || 0) : 0,
 			socket,
-		});
-		console.log(`[Dispatcher] Mobile 宣告就緒 (DEVICE_READY): ${deviceId} (Socket: ${socket.id}, status: idle)`);
-		tryDispatchToSocket(socket.id);
+		};
+
+		devicesMap.set(devUuid, connectedDevice);
+		socketToDeviceUuid.set(socket.id, devUuid);
+
+		const busyCount = Array.from(devicesMap.values()).filter((d) => d.status === 'busy').length;
+		const totalCount = devicesMap.size;
+		console.log(`[Dispatcher] Device [${devUuid}] connected and READY (Active: ${totalCount}, Busy: ${busyCount}/${totalCount}, Pending Messages: ${readyMessageQueue.length})`);
+
+		tryDispatchNext();
 	});
 
 	// 2. Mobile 完成一則訊息的視覺動態後，主動發送 DEVICE_IDLE 回報閒置
 	socket.on('DEVICE_IDLE', (data) => {
-		const deviceId = (data && data.deviceId) || socket.userId || socket.id;
-		const dev = mobileDevices.get(socket.id);
-		if (dev) {
-			dev.status = 'idle';
-		} else {
-			mobileDevices.set(socket.id, {
+		const devUuid =
+			(data && (data.deviceUuid || data.deviceId)) ||
+			socketToDeviceUuid.get(socket.id) ||
+			socket.handshake.query.deviceUuid ||
+			socket.handshake.query.deviceId ||
+			socket.userId ||
+			socket.id;
+
+		let dev = devicesMap.get(devUuid);
+		if (!dev) {
+			dev = {
+				deviceUuid: devUuid,
 				socketId: socket.id,
-				deviceId,
 				status: 'idle',
+				lastAssignedAt: 0,
 				socket,
-			});
+			};
+			devicesMap.set(devUuid, dev);
+		} else {
+			dev.status = 'idle';
+			dev.socketId = socket.id;
+			dev.socket = socket;
 		}
-		console.log(`[Dispatcher] Mobile 回報閒置 (DEVICE_IDLE): ${deviceId} (Socket: ${socket.id})`);
-		tryDispatchToSocket(socket.id);
+		socketToDeviceUuid.set(socket.id, devUuid);
+
+		const busyCount = Array.from(devicesMap.values()).filter((d) => d.status === 'busy').length;
+		const totalCount = devicesMap.size;
+		console.log(`[Dispatcher] Device [${devUuid}] reported IDLE (Busy: ${busyCount}/${totalCount}, Pending Messages: ${readyMessageQueue.length})`);
+
+		tryDispatchNext();
 	});
 
 	// 相容一般 message 事件
@@ -510,7 +588,16 @@ io.on('connection', (socket) => {
 	});
 
 	socket.on('disconnect', () => {
-		mobileDevices.delete(socket.id);
+		const devUuid = socketToDeviceUuid.get(socket.id);
+		if (devUuid) {
+			const dev = devicesMap.get(devUuid);
+			if (dev && dev.socketId === socket.id) {
+				devicesMap.delete(devUuid);
+				console.log(`[Dispatcher] Device [${devUuid}] disconnected (Remaining Active: ${devicesMap.size})`);
+			}
+			socketToDeviceUuid.delete(socket.id);
+		}
+
 		if (socket.isMonitor) {
 			console.log(`[Socket.IO] Monitor disconnected: ${socket.userId}`);
 		} else {

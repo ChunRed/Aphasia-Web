@@ -26,7 +26,7 @@ function MobileDisplay() {
 
 export default function Home() {
   return (
-    <SocketManager showIndicator={false}>
+    <SocketManager showIndicator={true}>
       <MobileDisplay />
     </SocketManager>
   );

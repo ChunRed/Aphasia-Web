@@ -112,9 +112,9 @@ export default function OverlayCenterText({
 }: OverlayCenterTextProps) {
   const { currentPayload: socketPayload, latestText, reportIdle } = useSocket();
 
-  // 判定目前生效的 Payload 與文字內容
+  // 判定目前生效的 Payload 與文字內容（未被派發到的裝置維持空文字與預設畫面）
   const activePayload = propPayload !== undefined ? propPayload : socketPayload;
-  const activeText = activePayload?.originalText || propText || latestText || "";
+  const activeText = activePayload?.originalText || propText || "";
   const activeKeywords = activePayload?.keywords || [];
 
   // 游標左右兩側的文字（支援游標在倒退刪除過程中精確停留在退格處）

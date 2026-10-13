@@ -54,34 +54,57 @@ export const getSocketServerUrl = (): string => {
 };
 
 /**
- * 取得或生成手機/客戶端持久性 UUID
- * 優先讀取 localStorage，若不存在則生成並寫入
+ * 取得或生成手機/客戶端持久性 Device UUID
+ * 優先順序：
+ * 1. URL 參數 ?deviceId=...（例如 ?deviceId=1 ~ 6 或 ?deviceId=phone-1，方便本地開啟多個分頁快速模擬 6 台不同手機）
+ * 2. localStorage.getItem('device_uuid') 或舊版 key
+ * 3. 若皆無，則生成一組新 UUID 並存入 localStorage
  */
-export const getOrCreateUUID = (): string => {
+export const getOrCreateDeviceUUID = (): string => {
   if (typeof window === "undefined") return "";
 
-  const STORAGE_KEY = "aphasia_mobile_user_uuid";
+  // 1. 優先檢查 URL 參數
   try {
-    let id = localStorage.getItem(STORAGE_KEY);
-    if (!id) {
-      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-        id = crypto.randomUUID();
-      } else {
-        id = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-          const r = (Math.random() * 16) | 0;
-          const v = c === "x" ? r : (r & 0x3) | 0x8;
-          return v.toString(16);
-        });
-      }
-      localStorage.setItem(STORAGE_KEY, id);
+    const params = new URLSearchParams(window.location.search);
+    const queryDeviceId = params.get("deviceId") || params.get("device_id") || params.get("id");
+    if (queryDeviceId && queryDeviceId.trim().length > 0) {
+      return queryDeviceId.trim();
     }
+  } catch {
+    // 忽略 SSR 或例外
+  }
+
+  // 2. 檢查 localStorage
+  const STORAGE_KEYS = ["device_uuid", "aphasia_mobile_device_uuid", "aphasia_mobile_user_uuid"];
+  try {
+    for (const key of STORAGE_KEYS) {
+      const stored = localStorage.getItem(key);
+      if (stored && stored.trim().length > 0) {
+        return stored.trim();
+      }
+    }
+
+    // 3. 若皆無，生成一組新 UUID 並存入 localStorage
+    let id = "";
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      id = crypto.randomUUID();
+    } else {
+      id = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    }
+    localStorage.setItem("device_uuid", id);
     return id;
   } catch {
     return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
-      : "temp-" + Math.random().toString(36).substring(2, 11);
+      : "dev-" + Math.random().toString(36).substring(2, 11);
   }
 };
+
+export const getOrCreateUUID = getOrCreateDeviceUUID;
 
 /**
  * 共享 Socket 單例（Singleton）
@@ -90,9 +113,9 @@ export const getOrCreateUUID = (): string => {
 let sharedSocket: SocketIOClient.Socket | null = null;
 
 export const getSharedSocket = (): SocketIOClient.Socket => {
+  const deviceUuid = getOrCreateDeviceUUID();
   if (!sharedSocket || sharedSocket.disconnected) {
     const targetUrl = getSocketServerUrl();
-    const userUUID = getOrCreateUUID();
     const isSecure =
       typeof window !== "undefined"
         ? window.location.protocol === "https:"
@@ -100,8 +123,10 @@ export const getSharedSocket = (): SocketIOClient.Socket => {
 
     sharedSocket = io(targetUrl, {
       query: {
-        uuid: userUUID,
-        role: "client",
+        deviceUuid,
+        deviceId: deviceUuid,
+        uuid: deviceUuid,
+        role: "mobile",
       },
       secure: isSecure,
       transports: ["websocket", "polling"],
@@ -136,6 +161,8 @@ export interface SocketContextValue {
   serverUrl: string;
   /** 本地客戶端 UUID */
   uuid: string;
+  /** 裝置專屬識別碼 (支援 URL ?deviceId=1~6 或 localStorage) */
+  deviceUuid: string;
   /** 最新接收到的 text 資料 */
   latestText: string;
   /** 接收到的歷史文字資料清單 */
@@ -157,6 +184,7 @@ const SocketContext = createContext<SocketContextValue>({
   isConnected: false,
   serverUrl: "",
   uuid: "",
+  deviceUuid: "",
   latestText: "",
   textHistory: [],
   currentPayload: null,
@@ -178,7 +206,7 @@ export interface SocketManagerProps {
 
 /**
  * 元件：SocketManager / SocketProvider
- * 負責 Socket.IO 連線管理、自動判定伺服器位址、拉取式派工握手 (DEVICE_READY/DISPATCH_PAYLOAD/DEVICE_IDLE)
+ * 負責 Socket.IO 連線管理、多裝置識別 (Device UUID)、拉取式派工握手 (DEVICE_READY/DISPATCH_PAYLOAD/DEVICE_IDLE)
  */
 export function SocketManager({
   children,
@@ -189,6 +217,7 @@ export function SocketManager({
   const [isConnected, setIsConnected] = useState(false);
   const [serverUrl, setServerUrl] = useState("");
   const [uuid, setUuid] = useState("");
+  const [deviceUuid, setDeviceUuid] = useState("");
   const [latestText, setLatestText] = useState("");
   const [textHistory, setTextHistory] = useState<SocketMessage[]>([]);
   const [currentPayload, setCurrentPayload] = useState<DispatchPayload | null>(null);
@@ -197,20 +226,25 @@ export function SocketManager({
 
   useEffect(() => {
     const targetUrl = getSocketServerUrl();
-    const userUUID = getOrCreateUUID();
+    const currentDeviceUuid = getOrCreateDeviceUUID();
     setServerUrl(targetUrl);
-    setUuid(userUUID);
+    setUuid(currentDeviceUuid);
+    setDeviceUuid(currentDeviceUuid);
 
     const socket = getSharedSocket();
     socketRef.current = socket;
     setIsConnected(socket.connected);
 
     const handleConnect = () => {
-      console.log(`[SocketManager] 連線成功: ${targetUrl} (UUID: ${userUUID})`);
+      console.log(`[SocketManager] 連線成功: ${targetUrl} (Device UUID: ${currentDeviceUuid})`);
       setIsConnected(true);
-      // 發送 DEVICE_READY 事件宣告就緒（攜帶目前狀態為 idle）
-      socket.emit("DEVICE_READY", { deviceId: userUUID, status: "idle" });
-      console.log(`[SocketManager] 已向 Server 發送 DEVICE_READY (狀態: idle)`);
+      // 發送 DEVICE_READY 事件宣告就緒（攜帶目前狀態為 idle 與 deviceUuid）
+      socket.emit("DEVICE_READY", {
+        deviceUuid: currentDeviceUuid,
+        deviceId: currentDeviceUuid,
+        status: "idle",
+      });
+      console.log(`[SocketManager] 已向 Server 發送 DEVICE_READY (Device: ${currentDeviceUuid}, status: idle)`);
     };
 
     const handleDisconnect = (reason: string) => {
@@ -277,8 +311,12 @@ export function SocketManager({
 
     // 若 socket 已經處於連線狀態（例如從單例中取出），立即發送一次 DEVICE_READY
     if (socket.connected) {
-      socket.emit("DEVICE_READY", { deviceId: userUUID, status: "idle" });
-      console.log(`[SocketManager] 現有連線立即發送 DEVICE_READY (狀態: idle)`);
+      socket.emit("DEVICE_READY", {
+        deviceUuid: currentDeviceUuid,
+        deviceId: currentDeviceUuid,
+        status: "idle",
+      });
+      console.log(`[SocketManager] 現有連線立即發送 DEVICE_READY (Device: ${currentDeviceUuid}, 狀態: idle)`);
     }
 
     socket.on("connect", handleConnect);
@@ -301,13 +339,17 @@ export function SocketManager({
   // 完成回報與解鎖：主動發送 DEVICE_IDLE 通知 Server
   const reportIdle = useCallback(() => {
     const socket = socketRef.current || getSharedSocket();
-    const currentUUID = uuid || getOrCreateUUID();
-    console.log(`[SocketManager] 視覺演出完成，發送 DEVICE_IDLE (deviceId: ${currentUUID})`);
+    const currentId = deviceUuid || uuid || getOrCreateDeviceUUID();
+    console.log(`[SocketManager] 視覺演出完成，發送 DEVICE_IDLE (Device: ${currentId})`);
     setDeviceStatus("idle");
     if (socket && socket.connected) {
-      socket.emit("DEVICE_IDLE", { deviceId: currentUUID, status: "idle" });
+      socket.emit("DEVICE_IDLE", {
+        deviceUuid: currentId,
+        deviceId: currentId,
+        status: "idle",
+      });
     }
-  }, [uuid]);
+  }, [deviceUuid, uuid]);
 
   // 資料傳送：發送 submit_text
   const sendText = useCallback(
@@ -323,7 +365,7 @@ export function SocketManager({
           return reject(new Error(`Socket 尚未連線 (${serverUrl})`));
         }
 
-        const currentUUID = uuid || getOrCreateUUID();
+        const currentUUID = deviceUuid || uuid || getOrCreateDeviceUUID();
         const payload = {
           uuid: currentUUID,
           text: trimmed,
@@ -343,7 +385,7 @@ export function SocketManager({
         }, 1200);
       });
     },
-    [serverUrl, uuid]
+    [serverUrl, uuid, deviceUuid]
   );
 
   // 通用事件傳送
@@ -362,6 +404,7 @@ export function SocketManager({
     isConnected,
     serverUrl,
     uuid,
+    deviceUuid,
     latestText,
     textHistory,
     currentPayload,
@@ -375,13 +418,21 @@ export function SocketManager({
     <SocketContext.Provider value={contextValue}>
       {children}
       {showIndicator && (
-        <div className="fixed top-3 right-3 z-50 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono bg-black/70 backdrop-blur-md text-white border border-white/20 select-none shadow">
+        <div className="fixed top-3 right-3 z-50 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono bg-black/75 backdrop-blur-md text-white border border-white/20 select-none shadow pointer-events-none">
           <span
             className={`w-2 h-2 rounded-full ${
-              isConnected ? "bg-emerald-400 animate-pulse" : "bg-red-400"
+              !isConnected
+                ? "bg-red-400"
+                : deviceStatus === "busy"
+                ? "bg-amber-400 animate-pulse"
+                : "bg-emerald-400 animate-pulse"
             }`}
           />
-          <span>{isConnected ? "CONNECTED" : "DISCONNECTED"}</span>
+          <span>
+            {isConnected
+              ? `DEV [${deviceUuid || uuid}] • ${deviceStatus.toUpperCase()}`
+              : "DISCONNECTED"}
+          </span>
         </div>
       )}
     </SocketContext.Provider>
