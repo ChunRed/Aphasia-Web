@@ -120,6 +120,13 @@ export interface SocketMessage {
   timestamp: number;
 }
 
+export interface DispatchPayload {
+  id: string;
+  userId: string;
+  originalText: string;
+  keywords: string[];
+}
+
 export interface SocketContextValue {
   /** Socket 實例 */
   socket: SocketIOClient.Socket | null;
@@ -133,6 +140,12 @@ export interface SocketContextValue {
   latestText: string;
   /** 接收到的歷史文字資料清單 */
   textHistory: SocketMessage[];
+  /** 最新由 Server 派發之分析資料 */
+  currentPayload: DispatchPayload | null;
+  /** 當前裝置狀態：閒置 (idle) 或展示中 (busy) */
+  deviceStatus: "idle" | "busy";
+  /** 向 Server 發送 DEVICE_IDLE 回報視覺演出完成並解鎖 */
+  reportIdle: () => void;
   /** 傳送文字方法（發送 submit_text 事件） */
   sendText: (text: string) => Promise<{ success: boolean; message: string }>;
   /** 通用資料傳送方法 */
@@ -146,6 +159,9 @@ const SocketContext = createContext<SocketContextValue>({
   uuid: "",
   latestText: "",
   textHistory: [],
+  currentPayload: null,
+  deviceStatus: "idle",
+  reportIdle: () => {},
   sendText: async () => ({ success: false, message: "Socket not initialized" }),
   emit: () => {},
 });
@@ -154,17 +170,20 @@ export interface SocketManagerProps {
   children?: ReactNode;
   /** 當接收到 new_text 時的自訂回呼函式 */
   onNewText?: (text: string, uuid: string) => void;
+  /** 當接收到 DISPATCH_PAYLOAD 時的自訂回呼函式 */
+  onDispatchPayload?: (payload: DispatchPayload) => void;
   /** 是否在畫面右上角顯示連線狀態小指示器（方便除錯，預設 false） */
   showIndicator?: boolean;
 }
 
 /**
  * 元件：SocketManager / SocketProvider
- * 負責 Socket.IO 連線管理、自動判定伺服器位址、資料接收（new_text 等）與資料傳送
+ * 負責 Socket.IO 連線管理、自動判定伺服器位址、拉取式派工握手 (DEVICE_READY/DISPATCH_PAYLOAD/DEVICE_IDLE)
  */
 export function SocketManager({
   children,
   onNewText,
+  onDispatchPayload,
   showIndicator = false,
 }: SocketManagerProps) {
   const [isConnected, setIsConnected] = useState(false);
@@ -172,6 +191,8 @@ export function SocketManager({
   const [uuid, setUuid] = useState("");
   const [latestText, setLatestText] = useState("");
   const [textHistory, setTextHistory] = useState<SocketMessage[]>([]);
+  const [currentPayload, setCurrentPayload] = useState<DispatchPayload | null>(null);
+  const [deviceStatus, setDeviceStatus] = useState<"idle" | "busy">("idle");
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
 
   useEffect(() => {
@@ -187,6 +208,9 @@ export function SocketManager({
     const handleConnect = () => {
       console.log(`[SocketManager] 連線成功: ${targetUrl} (UUID: ${userUUID})`);
       setIsConnected(true);
+      // 發送 DEVICE_READY 事件宣告就緒（攜帶目前狀態為 idle）
+      socket.emit("DEVICE_READY", { deviceId: userUUID, status: "idle" });
+      console.log(`[SocketManager] 已向 Server 發送 DEVICE_READY (狀態: idle)`);
     };
 
     const handleDisconnect = (reason: string) => {
@@ -197,6 +221,23 @@ export function SocketManager({
     const handleConnectError = (err: Error) => {
       console.warn(`[SocketManager] 連線失敗 (${targetUrl}):`, err?.message || err);
       setIsConnected(false);
+    };
+
+    // 監聽 Server 派發已完成分析訊息：DISPATCH_PAYLOAD
+    const handleDispatchPayload = (payload: DispatchPayload) => {
+      if (payload && payload.id) {
+        console.log(`[SocketManager] 收到 DISPATCH_PAYLOAD (ID: ${payload.id}, User: ${payload.userId}, 關鍵字: [${payload.keywords?.join(", ")}])`);
+        setCurrentPayload(payload);
+        setDeviceStatus("busy");
+        if (payload.originalText) {
+          setLatestText(payload.originalText);
+          setTextHistory((prev) => [
+            { uuid: payload.userId || "", text: payload.originalText, timestamp: Date.now() },
+            ...prev.slice(0, 49),
+          ]);
+        }
+        onDispatchPayload?.(payload);
+      }
     };
 
     // 監聽 new_text event 儲存其中的 text 資料
@@ -234,9 +275,16 @@ export function SocketManager({
       }
     };
 
+    // 若 socket 已經處於連線狀態（例如從單例中取出），立即發送一次 DEVICE_READY
+    if (socket.connected) {
+      socket.emit("DEVICE_READY", { deviceId: userUUID, status: "idle" });
+      console.log(`[SocketManager] 現有連線立即發送 DEVICE_READY (狀態: idle)`);
+    }
+
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("connect_error", handleConnectError);
+    socket.on("DISPATCH_PAYLOAD", handleDispatchPayload);
     socket.on("new_text", handleNewText);
     socket.on("init_data", handleInitData);
 
@@ -244,10 +292,22 @@ export function SocketManager({
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.off("connect_error", handleConnectError);
+      socket.off("DISPATCH_PAYLOAD", handleDispatchPayload);
       socket.off("new_text", handleNewText);
       socket.off("init_data", handleInitData);
     };
-  }, [onNewText]);
+  }, [onNewText, onDispatchPayload]);
+
+  // 完成回報與解鎖：主動發送 DEVICE_IDLE 通知 Server
+  const reportIdle = useCallback(() => {
+    const socket = socketRef.current || getSharedSocket();
+    const currentUUID = uuid || getOrCreateUUID();
+    console.log(`[SocketManager] 視覺演出完成，發送 DEVICE_IDLE (deviceId: ${currentUUID})`);
+    setDeviceStatus("idle");
+    if (socket && socket.connected) {
+      socket.emit("DEVICE_IDLE", { deviceId: currentUUID, status: "idle" });
+    }
+  }, [uuid]);
 
   // 資料傳送：發送 submit_text
   const sendText = useCallback(
@@ -304,6 +364,9 @@ export function SocketManager({
     uuid,
     latestText,
     textHistory,
+    currentPayload,
+    deviceStatus,
+    reportIdle,
     sendText,
     emit,
   };

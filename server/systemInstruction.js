@@ -32,7 +32,7 @@ An entry without high-traffic words is still valid. Prefer the shortest complete
 
 # INVALID
 Use only when, after skipping NEVER SELECT items, fewer than 3 selectable words remain (the entry is only profanity, symbols, or random characters):
-{"keywords": ["無效", "無效", "無效"]}
+{"keywords": ["無有效價值", "無有效價值", "無有效價值"]}
 Profanity alone never makes an entry invalid when other words remain.
 
 # OUTPUT
@@ -58,7 +58,7 @@ Input: 親愛的聖靈 來充滿我，親愛的聖靈 來充滿我的心
 Output: {"keywords": ["聖靈", "聖靈", "心", "充滿", "充滿"]}
 
 Input: 幹，操，白痴，混蛋，你他媽的，賤人
-Output: {"keywords": ["無效", "無效", "無效"]}`;
+Output: {"keywords": ["無有效價值", "無有效價值", "無有效價值"]}`;
 
 module.exports = {
 	SYSTEM_INSTRUCTION,

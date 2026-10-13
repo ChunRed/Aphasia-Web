@@ -69,9 +69,9 @@ const geminiConfig = {
 	temperature: 0.2, // 低隨機性，確保遵守抽取規則與權重排序
 
 	// 4. 思考預算控制 (Thinking Budget)
-	// 將 thinking 調到最低（或設為 minimal/0），降低延遲並避免浪費 token
+	// 將 thinking 調到最低（設為 minimal 1），降低延遲並避免浪費 token
 	thinkingConfig: {
-		thinkingBudget: 0,
+		thinkingBudget: 1,
 	},
 
 	// 5. 輸出 Token 上限
@@ -99,7 +99,7 @@ const GEMINI_TIMEOUT_MS = 10000;
 async function analyzeWithGemini(text) {
 	if (!ai) {
 		console.warn('[Gemini] SDK 尚未初始化，使用預設標籤');
-		return { keywords: ['無效', '無效', '無效'], isFallback: true };
+		return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
 	}
 
 	try {
@@ -108,18 +108,31 @@ async function analyzeWithGemini(text) {
 			setTimeout(() => reject(new Error('Gemini API 請求逾時')), GEMINI_TIMEOUT_MS)
 		);
 
-		const requestPromise = ai.models.generateContent({
+		let requestPromise = ai.models.generateContent({
 			model: GEMINI_MODEL,
 			contents: text,
 			config: geminiConfig,
 		});
 
-		const response = await Promise.race([requestPromise, timeoutPromise]);
+		let response;
+		try {
+			response = await Promise.race([requestPromise, timeoutPromise]);
+		} catch (initialErr) {
+			console.warn(`[Gemini] 初次請求失敗 (${initialErr.message})，嘗試降級設定重試...`);
+			const altConfig = { ...geminiConfig };
+			delete altConfig.thinkingConfig;
+			response = await ai.models.generateContent({
+				model: GEMINI_MODEL,
+				contents: text,
+				config: altConfig,
+			});
+		}
+
 		const rawText = response && response.text ? response.text.trim() : '';
 
 		if (!rawText) {
 			console.warn('[Gemini] 回傳內容為空，使用預設標籤');
-			return { keywords: ['無效', '無效', '無效'], isFallback: true };
+			return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
 		}
 
 		// 安全解析 JSON
@@ -128,7 +141,7 @@ async function analyzeWithGemini(text) {
 			parsed = JSON.parse(rawText);
 		} catch (parseErr) {
 			console.warn('[Gemini] JSON.parse 失敗:', parseErr.message, 'Raw text:', rawText);
-			return { keywords: ['無效', '無效', '無效'], isFallback: true };
+			return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
 		}
 
 		// 型別檢查與清洗：確保為字串陣列且非空
@@ -144,10 +157,10 @@ async function analyzeWithGemini(text) {
 		}
 
 		console.warn('[Gemini] 回傳格式不符合預期 (無有效 keywords 陣列):', parsed);
-		return { keywords: ['無效', '無效', '無效'], isFallback: true };
+		return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
 	} catch (err) {
 		console.error(`[Gemini] 分析過程發生例外 (${err.message})，觸發 Fallback`);
-		return { keywords: ['無效', '無效', '無效'], isFallback: true };
+		return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
 	}
 }
 
@@ -178,6 +191,55 @@ const THROTTLE_INTERVAL_MS = 5000; // 5 秒頻率限制 (Throttling)
 const messageLogs = [];
 const MAX_LOGS = 20;
 
+// 5.1 待派發給 mobile 展示端的分析成果佇列 (Dispatch Queue)
+const dispatchQueue = [];
+
+// 記錄所有連線的 mobile 裝置狀態
+// Map<socketId, { socketId: string, deviceId: string, status: 'idle' | 'busy', socket: any }>
+const mobileDevices = new Map();
+
+/**
+ * 嘗試將佇列中的待展示資料派發給指定的 mobile socket
+ */
+function tryDispatchToSocket(socketId) {
+	const dev = mobileDevices.get(socketId);
+	if (!dev || dev.status !== 'idle') return;
+	if (dispatchQueue.length > 0) {
+		const item = dispatchQueue.shift();
+		const payload = {
+			id: item.id,
+			userId: item.userId,
+			originalText: item.originalText,
+			keywords: item.keywords,
+		};
+		dev.status = 'busy';
+		dev.socket.emit('DISPATCH_PAYLOAD', payload);
+		console.log(`[Dispatcher] 派發訊息給 Mobile ${dev.deviceId} (Msg ID: ${item.id}, 剩餘待派發: ${dispatchQueue.length})`);
+	}
+}
+
+/**
+ * 嘗試將待展示資料派發給任何閒置 (idle) 的 mobile 裝置
+ */
+function tryDispatchToIdleMobiles() {
+	if (dispatchQueue.length === 0) return;
+	for (const [sId, dev] of mobileDevices.entries()) {
+		if (dev.status === 'idle') {
+			const item = dispatchQueue.shift();
+			const payload = {
+				id: item.id,
+				userId: item.userId,
+				originalText: item.originalText,
+				keywords: item.keywords,
+			};
+			dev.status = 'busy';
+			dev.socket.emit('DISPATCH_PAYLOAD', payload);
+			console.log(`[Dispatcher] 派發訊息給 Mobile ${dev.deviceId} (Msg ID: ${item.id}, 剩餘待派發: ${dispatchQueue.length})`);
+			if (dispatchQueue.length === 0) break;
+		}
+	}
+}
+
 // 計算當前真實線上使用者人數（排除 monitor 監控頁面，按 userId / UUID 去重）
 const getOnlineUserCount = () => {
 	const userUuids = new Set();
@@ -206,6 +268,7 @@ const broadcastQueueStatus = () => {
 	io.emit('queue_status', {
 		pendingCount: pendingQueue.length,
 		isProcessing: isQueueProcessing,
+		dispatchQueueCount: dispatchQueue.length,
 	});
 };
 
@@ -233,7 +296,7 @@ async function processQueue() {
 		}
 	} catch (err) {
 		console.error(`[Queue] 處理項目 ${currentItem.id} 時發生錯誤:`, err);
-		analysisResult = { keywords: ['無效', '無效', '無效'], isFallback: true };
+		analysisResult = { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
 		hasError = true;
 	}
 
@@ -258,6 +321,18 @@ async function processQueue() {
 		if (messageLogs.length > MAX_LOGS) {
 			messageLogs.pop();
 		}
+
+		// 存入待展示派發佇列 (Pull/Handshake Dispatch Queue)
+		dispatchQueue.push({
+			id: processedEntry.id,
+			userId: processedEntry.userId,
+			originalText: processedEntry.originalText,
+			keywords: processedEntry.keywords,
+		});
+		console.log(`[Dispatcher] 新增項目至待派發佇列 (ID: ${processedEntry.id}, 佇列長度: ${dispatchQueue.length})`);
+
+		// 立即嘗試派發給目前處於 idle 的 mobile 展示端
+		tryDispatchToIdleMobiles();
 
 		// 廣播給所有連線客戶端（展示端、監控面板等）
 		io.emit('new_processed_entry', processedEntry);
@@ -389,6 +464,38 @@ io.on('connection', (socket) => {
 	socket.on('SUBMIT_DIARY', handleDiarySubmission);
 	socket.on('submit_text', handleDiarySubmission);
 
+	// 支援 Mobile 端的拉取式 (Pull/Handshake) 派工機制
+	// 1. Mobile 啟動連線完成，宣告就緒 (DEVICE_READY)
+	socket.on('DEVICE_READY', (data) => {
+		const deviceId = (data && data.deviceId) || socket.userId || socket.id;
+		mobileDevices.set(socket.id, {
+			socketId: socket.id,
+			deviceId,
+			status: 'idle',
+			socket,
+		});
+		console.log(`[Dispatcher] Mobile 宣告就緒 (DEVICE_READY): ${deviceId} (Socket: ${socket.id}, status: idle)`);
+		tryDispatchToSocket(socket.id);
+	});
+
+	// 2. Mobile 完成一則訊息的視覺動態後，主動發送 DEVICE_IDLE 回報閒置
+	socket.on('DEVICE_IDLE', (data) => {
+		const deviceId = (data && data.deviceId) || socket.userId || socket.id;
+		const dev = mobileDevices.get(socket.id);
+		if (dev) {
+			dev.status = 'idle';
+		} else {
+			mobileDevices.set(socket.id, {
+				socketId: socket.id,
+				deviceId,
+				status: 'idle',
+				socket,
+			});
+		}
+		console.log(`[Dispatcher] Mobile 回報閒置 (DEVICE_IDLE): ${deviceId} (Socket: ${socket.id})`);
+		tryDispatchToSocket(socket.id);
+	});
+
 	// 相容一般 message 事件
 	socket.on('message', (data, callback) => {
 		console.log(`[Socket.IO] Message from ${socket.userId}:`, data);
@@ -403,6 +510,7 @@ io.on('connection', (socket) => {
 	});
 
 	socket.on('disconnect', () => {
+		mobileDevices.delete(socket.id);
 		if (socket.isMonitor) {
 			console.log(`[Socket.IO] Monitor disconnected: ${socket.userId}`);
 		} else {

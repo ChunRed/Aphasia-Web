@@ -80,6 +80,7 @@ export interface FloatingTextNetworkInstance {
   nodes: NodeData[];
   update: (time: number) => void;
   dispose: () => void;
+  updateKeywords: (newKeywords: string[]) => void;
 }
 
 /**
@@ -146,7 +147,7 @@ export function createFloatingTextNetwork(
     springTension = RHYTHM_CONFIG.SPRING_TENSION,
     connectDistance = 2.1,
     nodeCount = 5,
-    labels = ["#0", "#1", "#2", "#3", "#4"],
+    labels = ["無感", "剩餘價值", "每天", "灰色", "DAF"],
     lineColor = 0x000000,
     textColor = "#000000",
   } = options;
@@ -154,53 +155,9 @@ export function createFloatingTextNetwork(
   const group = new THREE.Group();
   const nodes: NodeData[] = [];
 
-  // 1. 初始化文字節點（以費氏球體均勻分佈在 3D 空間半徑）
-  for (let i = 0; i < nodeCount; i++) {
-    const textIndex = i % labels.length;
-    const label = labels[textIndex];
-    const bits = calculateStringBits(label);
-    const subText = showBitsInfo ? `#${textIndex} · ${bits} bits` : undefined;
-
-    const phi = Math.acos(1 - (2 * (i + 0.5)) / nodeCount);
-    const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
-
-    const r = spreadRadius + Math.sin(i * 1.7) * (spreadRadius * 0.15);
-    const x0 = r * Math.sin(phi) * Math.cos(theta);
-    const y0 = r * Math.sin(phi) * Math.sin(theta);
-    const z0 = r * Math.cos(phi);
-
-    const basePos = new THREE.Vector3(x0, y0, z0);
-    const currentPos = basePos.clone();
-    const startPos = basePos.clone();
-    const targetPos = basePos.clone();
-
-    // 建立文字貼圖 Sprite（主文字 + 下方略小之 index 與 bits）
-    const spriteResult = createTextSprite(label, {
-      fontSize,
-      color: textColor,
-      scale: textScale,
-      subText,
-      subTextRatio,
-    });
-    spriteResult.sprite.position.copy(currentPos);
-    group.add(spriteResult.sprite);
-
-    nodes.push({
-      id: i,
-      label,
-      textIndex,
-      bits,
-      basePos,
-      currentPos,
-      startPos,
-      targetPos,
-      spriteResult,
-    });
-  }
-
-  // 2. 建立動態連線網路（LineSegments + BufferGeometry）
-  const maxPairs = (nodeCount * (nodeCount - 1)) / 2;
-  const linePositions = new Float32Array(maxPairs * 2 * 3);
+  // 2. 建立動態連線網路（預先配置足夠容納節點的 BufferGeometry，避免頻繁 reallocation）
+  const MAX_PAIRS = 300;
+  const linePositions = new Float32Array(MAX_PAIRS * 2 * 3);
 
   const lineGeometry = new THREE.BufferGeometry();
   const positionAttribute = new THREE.BufferAttribute(linePositions, 3);
@@ -218,8 +175,94 @@ export function createFloatingTextNetwork(
   lineSegments.renderOrder = 5;
   group.add(lineSegments);
 
-  // 追蹤當前拍點，用於偵測拍點切換時重新計算各節點的目標位置
+  // 物理彈簧重組（Drop/Jump）狀態控制
+  let isDropping = false;
+  let dropProgress = 0;
+  const DROP_DURATION = 1.1; // 降臨彈簧時間（秒）
+  let lastTime = 0;
   let lastProcessedBeat = -1;
+
+  /**
+   * 重新構建文字節點與位元標籤，並觸發物理彈簧重組（Drop/Jump）
+   */
+  const rebuildNodes = (targetLabels: string[], triggerDrop: boolean = true) => {
+    // 清除舊節點 Sprite 與 GPU 貼圖資源
+    nodes.forEach((n) => {
+      group.remove(n.spriteResult.sprite);
+      n.spriteResult.dispose();
+    });
+    nodes.length = 0;
+
+    const filtered = targetLabels.filter((l) => typeof l === "string" && l.trim().length > 0);
+    const effectiveLabels = filtered.length > 0 ? filtered : ["無感", "剩餘價值", "每天", "灰色", "DAF"];
+    const count = effectiveLabels.length;
+
+    for (let i = 0; i < count; i++) {
+      const textIndex = i;
+      const label = effectiveLabels[i];
+      const bits = calculateStringBits(label);
+      // 依照規格生成 UTF-8 位元數標籤（如 [48 bits]）
+      const subText = showBitsInfo ? `[${bits} bits]` : undefined;
+
+      const phi = Math.acos(1 - (2 * (i + 0.5)) / count);
+      const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
+
+      const r = spreadRadius + Math.sin(i * 1.7) * (spreadRadius * 0.15);
+      const x0 = r * Math.sin(phi) * Math.cos(theta);
+      const y0 = r * Math.sin(phi) * Math.sin(theta);
+      const z0 = r * Math.cos(phi);
+
+      const basePos = new THREE.Vector3(x0, y0, z0);
+      const targetPos = basePos.clone();
+
+      let startPos: THREE.Vector3;
+      let currentPos: THREE.Vector3;
+
+      if (triggerDrop) {
+        // 高空躍遷降臨 + 外圍爆散向量，呈現新關鍵字降臨之視覺張力
+        startPos = new THREE.Vector3(
+          x0 * 2.3 + Math.sin(i * 3.7) * 1.5,
+          y0 + 5.2 + Math.cos(i * 2.1) * 2.2,
+          z0 * 2.3 + Math.cos(i * 1.9) * 1.5
+        );
+        currentPos = startPos.clone();
+      } else {
+        startPos = basePos.clone();
+        currentPos = basePos.clone();
+      }
+
+      // 建立文字貼圖 Sprite
+      const spriteResult = createTextSprite(label, {
+        fontSize,
+        color: textColor,
+        scale: textScale,
+        subText,
+        subTextRatio,
+      });
+      spriteResult.sprite.position.copy(currentPos);
+      group.add(spriteResult.sprite);
+
+      nodes.push({
+        id: i,
+        label,
+        textIndex,
+        bits,
+        basePos,
+        currentPos,
+        startPos,
+        targetPos,
+        spriteResult,
+      });
+    }
+
+    if (triggerDrop) {
+      isDropping = true;
+      dropProgress = 0;
+    }
+  };
+
+  // 初始化預設節點（不觸發強制墜落）
+  rebuildNodes(labels, false);
 
   /**
    * 依據節拍階層（每 1 拍小跳、每 4 拍中跳、每 8 拍大跳）計算節點的「下一個真實三維空間座標」
@@ -271,54 +314,82 @@ export function createFloatingTextNetwork(
 
   // 3. 節拍器計數器與躍遷更新
   const update = (time: number) => {
-    const safeInterval = Math.max(0.02, beatInterval);
-    const beatIndex = Math.floor(time / safeInterval);
-    const beatElapsed = time - beatIndex * safeInterval; // [0, beatInterval)
-    const normalizedBeatTime = Math.min(1, Math.max(0, beatElapsed / safeInterval));
+    const currentNodeCount = nodes.length;
+    if (currentNodeCount === 0) return;
 
-    // 當拍點切換時（進入新的一拍），更新所有節點的起點與新的空間目標位置
-    if (beatIndex !== lastProcessedBeat) {
-      lastProcessedBeat = beatIndex;
+    const dt = lastTime > 0 ? Math.min(0.1, time - lastTime) : 0.016;
+    lastTime = time;
 
-      for (let i = 0; i < nodeCount; i++) {
+    // 若正處於新關鍵字降臨物理彈簧重組階段 (Drop/Jump)
+    if (isDropping) {
+      dropProgress += dt / DROP_DURATION;
+      const springProgress = calculateSpringHopProgress(
+        Math.min(1, dropProgress),
+        damping * 0.8,
+        springTension * 1.2
+      );
+
+      for (let i = 0; i < currentNodeCount; i++) {
         const node = nodes[i];
-        // 將上一拍的終點作為本拍的起點
-        node.startPos.copy(node.targetPos);
-        // 計算本拍真正的全新空間目標位置
-        const newTarget = computeNextTarget(node, beatIndex);
-        node.targetPos.copy(newTarget);
+        node.currentPos.lerpVectors(node.startPos, node.targetPos, springProgress);
+        node.spriteResult.sprite.position.copy(node.currentPos);
       }
-    }
 
-    // 計算彈簧衝擊與回彈進度 (0 -> 1，帶瞬間初速爆發與回彈過衝)
-    const springProgress = calculateSpringHopProgress(
-      normalizedBeatTime,
-      damping,
-      springTension
-    );
+      if (dropProgress >= 1) {
+        isDropping = false;
+        // 降臨完畢，使 startPos 定格在 targetPos，並同步拍點
+        for (let i = 0; i < currentNodeCount; i++) {
+          nodes[i].startPos.copy(nodes[i].targetPos);
+        }
+        const safeInterval = Math.max(0.02, beatInterval);
+        lastProcessedBeat = Math.floor(time / safeInterval);
+      }
+    } else {
+      // 正常階層式音樂節拍脈衝
+      const safeInterval = Math.max(0.02, beatInterval);
+      const beatIndex = Math.floor(time / safeInterval);
+      const beatElapsed = time - beatIndex * safeInterval;
+      const normalizedBeatTime = Math.min(1, Math.max(0, beatElapsed / safeInterval));
 
-    // 3.1 根據彈簧進度，將節點位移從 startPos 躍遷到 targetPos
-    for (let i = 0; i < nodeCount; i++) {
-      const node = nodes[i];
+      // 當拍點切換時（進入新的一拍），更新所有節點的起點與新的空間目標位置
+      if (beatIndex !== lastProcessedBeat) {
+        lastProcessedBeat = beatIndex;
 
-      // 真正位移到三維新座標，不再是單純的原地放大縮小！
-      node.currentPos.lerpVectors(node.startPos, node.targetPos, springProgress);
-      node.spriteResult.sprite.position.copy(node.currentPos);
+        for (let i = 0; i < currentNodeCount; i++) {
+          const node = nodes[i];
+          node.startPos.copy(node.targetPos);
+          const newTarget = computeNextTarget(node, beatIndex);
+          node.targetPos.copy(newTarget);
+        }
+      }
+
+      // 計算彈簧衝擊與回彈進度
+      const springProgress = calculateSpringHopProgress(
+        normalizedBeatTime,
+        damping,
+        springTension
+      );
+
+      for (let i = 0; i < currentNodeCount; i++) {
+        const node = nodes[i];
+        node.currentPos.lerpVectors(node.startPos, node.targetPos, springProgress);
+        node.spriteResult.sprite.position.copy(node.currentPos);
+      }
     }
 
     // 3.2 線條頂點 100% 同步更新
     let segmentCount = 0;
     const posAttr = positionAttribute;
 
-    for (let i = 0; i < nodeCount; i++) {
+    for (let i = 0; i < currentNodeCount; i++) {
       const posA = nodes[i].currentPos;
 
-      for (let j = i + 1; j < nodeCount; j++) {
+      for (let j = i + 1; j < currentNodeCount; j++) {
         const posB = nodes[j].currentPos;
         const dist = posA.distanceTo(posB);
 
         // 實時依據即時新座標連線
-        if (dist <= connectDistance) {
+        if (dist <= connectDistance && segmentCount < MAX_PAIRS) {
           const vIdx = segmentCount * 2;
           posAttr.setXYZ(vIdx, posA.x, posA.y, posA.z);
           posAttr.setXYZ(vIdx + 1, posB.x, posB.y, posB.z);
@@ -327,10 +398,11 @@ export function createFloatingTextNetwork(
       }
     }
 
-    // 確保網絡骨架
-    if (segmentCount < nodeCount) {
-      for (let i = 0; i < nodeCount; i++) {
-        const nextIdx = (i + 1) % nodeCount;
+    // 確保網絡骨架（在兩兩距離過遠時維持連通度）
+    if (segmentCount < currentNodeCount && currentNodeCount > 1) {
+      for (let i = 0; i < currentNodeCount; i++) {
+        if (segmentCount >= MAX_PAIRS) break;
+        const nextIdx = (i + 1) % currentNodeCount;
         const posA = nodes[i].currentPos;
         const posB = nodes[nextIdx].currentPos;
 
@@ -346,6 +418,15 @@ export function createFloatingTextNetwork(
   };
 
   update(0);
+
+  // 動態更新關鍵字 API：替換 Sprite、重新計算 bits、並觸發彈簧 Drop/Jump 重組
+  const updateKeywords = (newKeywords: string[]) => {
+    if (!newKeywords || !Array.isArray(newKeywords) || newKeywords.length === 0) return;
+    const valid = newKeywords.filter((k) => typeof k === "string" && k.trim().length > 0);
+    if (valid.length === 0) return;
+    console.log(`[FloatingTextNetwork] 接收新關鍵字: [${valid.join(", ")}]，觸發物理彈簧降臨 (Drop/Jump)`);
+    rebuildNodes(valid, true);
+  };
 
   // 4. 清理卸載
   const dispose = () => {
@@ -364,5 +445,6 @@ export function createFloatingTextNetwork(
     nodes,
     update,
     dispose,
+    updateKeywords,
   };
 }

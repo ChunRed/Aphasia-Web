@@ -125,6 +125,8 @@ export interface MainCanvasProps {
   rotateSpeed?: number;
   /** 可自訂覆蓋的文字網路設定 */
   textNetworkConfig?: Partial<FloatingTextNetworkOptions>;
+  /** 動態關鍵字陣列（由 Socket 接收） */
+  keywords?: string[];
 }
 
 export default function MainCanvas({
@@ -134,8 +136,17 @@ export default function MainCanvas({
   autoRotate = CAMERA_CONFIG.autoRotate,
   rotateSpeed = CAMERA_CONFIG.rotateSpeed,
   textNetworkConfig,
+  keywords,
 }: MainCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const floatingNetworkRef = useRef<ReturnType<typeof createFloatingTextNetwork> | null>(null);
+
+  // 監聽 keywords 變更，動態替換 3D 文字 Sprite 並觸發彈簧 Drop/Jump 重組
+  useEffect(() => {
+    if (keywords && keywords.length > 0 && floatingNetworkRef.current) {
+      floatingNetworkRef.current.updateKeywords(keywords);
+    }
+  }, [keywords]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -182,6 +193,10 @@ export default function MainCanvas({
     // 6. 核心視覺圖層 2：飄動文字節點與動態連線網路 (Floating Text Nodes Network)
     const mergedTextConfig = { ...TEXT_NETWORK_CONFIG, ...textNetworkConfig };
     const floatingNetwork = createFloatingTextNetwork(mergedTextConfig);
+    floatingNetworkRef.current = floatingNetwork;
+    if (keywords && keywords.length > 0) {
+      floatingNetwork.updateKeywords(keywords);
+    }
     scene.add(floatingNetwork.group);
 
     // 7. 後處理系統 (EffectComposer + RenderPass + BlockInvertPass + Monochrome GlitchPass)
@@ -314,6 +329,7 @@ export default function MainCanvas({
       postProcessing.dispose();
 
       floatingNetwork.dispose();
+      floatingNetworkRef.current = null;
       scene.remove(floatingNetwork.group);
 
       dynamicLine.dispose();
