@@ -30,8 +30,9 @@ if (GEMINI_API_KEY) {
 	console.warn('[Config] [WARN] 未偵測到 GEMINI_API_KEY，將啟用 Fallback 模式');
 }
 
-// 2. 引入 System Instruction（社交媒體演算法推薦規則）
+// 2. 引入 System Instruction（社交媒體演算法推薦規則）與持久化歸檔模組
 const { SYSTEM_INSTRUCTION } = require('./systemInstruction');
+const { appendMessageArchive, ARCHIVE_FILE } = require('./archiveLogger');
 
 // 3. 官方 @google/genai SDK 初始化與確切呼叫配置規格 (geminiConfig)
 let ai = null;
@@ -364,6 +365,11 @@ async function processQueue() {
 
 		console.log(`[Queue] 分析成功: User ${processedEntry.userId} -> [${processedEntry.keywords.join(', ')}]`);
 
+		// 本地日誌非同步追加寫入（Append-only Log 永久存檔備份，獨立 try/catch，絕不阻塞主流程與派發）
+		appendMessageArchive(processedEntry).catch((err) => {
+			console.error('[ArchiveLog] 非同步寫入發生未預期錯誤:', err);
+		});
+
 		// 存入記憶體陣列（維護最新 20 則，超過則先進先出 FIFO）
 		messageLogs.unshift(processedEntry);
 		if (messageLogs.length > MAX_LOGS) {
@@ -621,5 +627,6 @@ server.listen(PORT, '0.0.0.0', () => {
 	console.log(`[Server] Aphasia Server running on http://localhost:${PORT}`);
 	console.log(`[Config] Gemini Model: ${GEMINI_MODEL}`);
 	console.log(`[Queue] Queue Throttling: 1 request / ${THROTTLE_INTERVAL_MS / 1000}s`);
+	console.log(`[ArchiveLog] Append-only Log: ${ARCHIVE_FILE}`);
 	console.log(`===============================================`);
 });
