@@ -2,6 +2,11 @@
 
 import dynamic from "next/dynamic";
 import { SocketManager, useSocket } from "@/components/socket/SocketManager";
+import {
+  PerformanceTimelineProvider,
+  usePerformanceTimeline,
+  TimelinePhase,
+} from "@/components/timeline/PerformanceTimeline";
 import OverlayCenterText from "@/components/ui/OverlayCenterText";
 
 // Dynamically load the Three.js MainCanvas component with SSR disabled
@@ -10,17 +15,54 @@ const MainCanvas = dynamic(
   { ssr: false }
 );
 
+/**
+ * 暫時性 Debug 驗證指示器
+ * 顯示格式：[Timer: 12.4s | PHASE_2_RUPTURE]
+ */
+function TimelineIndicator() {
+  const { phase, elapsedTime, cycleIndex } = usePerformanceTimeline();
+
+  const phaseColors: Record<TimelinePhase, string> = {
+    [TimelinePhase.PHASE_1_ACCUMULATE]: "text-emerald-400 border-emerald-500/30",
+    [TimelinePhase.PHASE_2_RUPTURE]: "text-amber-400 border-amber-500/50 animate-pulse",
+    [TimelinePhase.PHASE_3_ERASE]: "text-rose-400 border-rose-500/30",
+    [TimelinePhase.PHASE_4_RESIDUAL]: "text-cyan-400 border-cyan-500/30",
+  };
+
+  return (
+    <div className="fixed top-3 left-3 z-50 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-mono bg-black/85 backdrop-blur-md text-white border border-white/20 select-none shadow pointer-events-none transition-colors duration-300">
+      <span className="text-white/60">[Timer:</span>
+      <span className="font-semibold text-white tracking-wide">
+        {elapsedTime.toFixed(1)}s
+      </span>
+      <span className="text-white/40">|</span>
+      <span className={`font-semibold tracking-wider ${phaseColors[phase]}`}>
+        {phase}
+      </span>
+      <span className="text-white/60">]</span>
+      {cycleIndex > 0 && (
+        <span className="opacity-40 text-[9px] ml-1">#{cycleIndex}</span>
+      )}
+    </div>
+  );
+}
+
 function MobileDisplay() {
   const { currentPayload } = useSocket();
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-white">
-      {/* 3D WebGL Canvas Layer (Thick Line + Connected Floating Text Nodes) */}
-      <MainCanvas keywords={currentPayload?.keywords} />
+    <PerformanceTimelineProvider autoReportIdle={true}>
+      <main className="relative w-screen h-screen overflow-hidden bg-white select-none">
+        {/* Timeline HUD Debug Indicator: [Timer: 12.4s | PHASE_2_RUPTURE] */}
+        <TimelineIndicator />
 
-      {/* UI Overlay Layer (Typing -> Hold -> Smart Backspace -> Report Idle -> Idle Loop) */}
-      <OverlayCenterText payload={currentPayload} />
-    </main>
+        {/* 3D WebGL Canvas Layer (純粹化：僅保留 FloatingTextNetwork + 黑色直線網絡 + 12.0s 瞬間故障著色器，已移除 DynamicLine) */}
+        <MainCanvas keywords={currentPayload?.keywords} />
+
+        {/* 2D UI Overlay Layer (0-12s 沉澱打字與凝視 -> 12-15s 對照 -> 15-21s 倒退抹消 -> 21-25s 殘留懸空) */}
+        <OverlayCenterText payload={currentPayload} />
+      </main>
+    </PerformanceTimelineProvider>
   );
 }
 

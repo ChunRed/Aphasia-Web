@@ -1,22 +1,15 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { useSocket, DispatchPayload } from "../socket/SocketManager";
+import { DispatchPayload } from "../socket/SocketManager";
+import {
+  usePerformanceTimeline,
+  TimelinePhase,
+} from "../timeline/PerformanceTimeline";
 
 export interface OverlayCenterTextProps {
-  /** 手動傳入 payload（若無則自動使用 Socket 派發之 currentPayload） */
   payload?: DispatchPayload | null;
-  /** 手動傳入文字（相容舊版本介面） */
   text?: string;
-  /** 自訂打字機基準速率（毫秒/字元，若未設定則自動使用 100~130ms 隨機有機節奏） */
-  typingSpeed?: number;
-  /** 自訂倒退刪除基準速率（毫秒/字元，若未設定則自動使用 45~75ms 隨機有機節奏） */
-  backspaceSpeed?: number;
-  /** Step 2 閱讀駐留時間（毫秒），預設 1500ms */
-  holdDuration?: number;
-  /** Step 4 演出結束停留時間（毫秒），預設 2000ms */
-  endPauseDuration?: number;
-  /** 預設顯示文字（當尚未接收到任何資料時），預設 "[ web view ]" */
   defaultText?: string;
 }
 
@@ -31,9 +24,6 @@ interface MatchRange {
   word: string;
 }
 
-/**
- * 判定字元是否為標點符號或分隔符（，、。、！、？、、、空格、換行等）
- */
 const PUNCTUATION_SET = new Set([
   '，', '、', '。', '！', '？', '…', '—', '～', '：', '；',
   ',', '.', '!', '?', ';', ':', ' ', '\n', '\t'
@@ -44,17 +34,9 @@ function isPunctuationOrSeparator(char: string): boolean {
   return PUNCTUATION_SET.has(char) || /[\s\p{P}]/u.test(char);
 }
 
-/**
- * 1. 打字階段動態（Humanized Typing）延遲計算
- * 基準隨機延遲：每字基準約 100ms ~ 130ms
- * 隨機浮動：delay = baseDelay + Math.random() * 80 - 40
- * 標點停頓（Thinking Hesitation）：遇到標點符號額外加入 400ms ~ 650ms 思考停頓
- */
-function getHumanizedTypingDelay(charJustTyped: string, customBaseSpeed?: number): number {
-  const baseDelay =
-    customBaseSpeed !== undefined ? customBaseSpeed : 100 + Math.random() * 30;
-  let delay = baseDelay + (Math.random() * 80 - 40);
-  delay = Math.max(30, delay);
+function getHumanizedTypingDelay(charJustTyped: string, baseSpeed: number = 115): number {
+  let delay = baseSpeed + (Math.random() * 40 - 20);
+  delay = Math.max(35, delay);
 
   if (isPunctuationOrSeparator(charJustTyped)) {
     const hesitation = 400 + Math.random() * 250;
@@ -64,40 +46,24 @@ function getHumanizedTypingDelay(charJustTyped: string, customBaseSpeed?: number
   return Math.round(delay);
 }
 
-/**
- * 2. 倒退刪除階段動態（Selective Backspacing）延遲計算
- * 刪除節奏：每字約 45ms ~ 75ms
- */
-function getSelectiveBackspacingDelay(customDeleteSpeed?: number): number {
-  if (customDeleteSpeed !== undefined) {
-    return Math.max(20, Math.round(customDeleteSpeed + (Math.random() * 20 - 10)));
-  }
-  return Math.round(45 + Math.random() * 30);
+function getSelectiveBackspacingDelay(baseDeleteSpeed: number = 55): number {
+  return Math.max(30, Math.round(baseDeleteSpeed + (Math.random() * 20 - 10)));
 }
 
-/**
- * 關鍵字識別停頓（Keyword Hesitation Pause）
- * 當倒退刪除碰到需要保留的關鍵字時，在此節點短暫停頓 250ms ~ 350ms
- */
 function getKeywordRecognitionPause(): number {
   return Math.round(250 + Math.random() * 100);
 }
 
-/**
- * 將原始日記依據 Gemini 萃取出的關鍵字陣列切分為保留關鍵字區塊與非關鍵字區塊
- */
 function parseTextSegments(text: string, keywords: string[]): TextSegment[] {
   if (!text) return [];
   if (!keywords || keywords.length === 0) {
     return [{ text, isKeyword: false }];
   }
 
-  // 1. 去重並由長至短排序，避免長詞被子字串切碎
   const uniqueKeywords = Array.from(
     new Set(keywords.filter((k) => typeof k === "string" && k.trim().length > 0))
   ).sort((a, b) => b.length - a.length);
 
-  // 2. 尋找所有關鍵字在原始文本中的位置區間
   const matches: MatchRange[] = [];
   for (const kw of uniqueKeywords) {
     let searchStart = 0;
@@ -109,10 +75,8 @@ function parseTextSegments(text: string, keywords: string[]): TextSegment[] {
     }
   }
 
-  // 依照起始位置排序
   matches.sort((a, b) => a.start - b.start);
 
-  // 解決可能重疊的區間（優先保留先出現者）
   const nonOverlapping: MatchRange[] = [];
   let lastEnd = 0;
   for (const m of matches) {
@@ -122,12 +86,10 @@ function parseTextSegments(text: string, keywords: string[]): TextSegment[] {
     }
   }
 
-  // 若文本中未出現任何關鍵字（極端 fallback 狀況）
   if (nonOverlapping.length === 0) {
     return [{ text, isKeyword: false }];
   }
 
-  // 3. 切割成交替的 TextSegment 清單
   const segments: TextSegment[] = [];
   let cursor = 0;
   for (const m of nonOverlapping) {
@@ -156,27 +118,27 @@ function parseTextSegments(text: string, keywords: string[]): TextSegment[] {
 export default function OverlayCenterText({
   payload: propPayload,
   text: propText,
-  typingSpeed,
-  backspaceSpeed,
-  holdDuration = 1500,
-  endPauseDuration = 2000,
-  defaultText = "[ web view ]",
+  defaultText = "城市在灰色迷霧中沉睡，我們每天重複著無感的剩餘價值。",
 }: OverlayCenterTextProps) {
-  const { currentPayload: socketPayload, reportIdle } = useSocket();
+  const {
+    phase,
+    payload: timelinePayload,
+    cycleIndex,
+  } = usePerformanceTimeline();
 
-  // 判定目前生效的 Payload 與文字內容（未被派發到的裝置維持空文字與預設畫面）
-  const activePayload = propPayload !== undefined ? propPayload : socketPayload;
-  const activeText = activePayload?.originalText || propText || "";
-  const activeKeywords = activePayload?.keywords || [];
+  const activePayload = propPayload !== undefined ? propPayload : timelinePayload;
+  const activeText = activePayload?.originalText || propText || defaultText;
+  const activeKeywords =
+    activePayload?.keywords && activePayload.keywords.length > 0
+      ? activePayload.keywords
+      : ["無感", "剩餘價值", "每天", "灰色"];
 
-  // 游標左右兩側的文字（支援游標在倒退刪除過程中精確停留在退格處）
-  const [beforeCursor, setBeforeCursor] = useState<string>(defaultText);
+  const [beforeCursor, setBeforeCursor] = useState<string>("");
   const [afterCursor, setAfterCursor] = useState<string>("");
-  const [showCursor, setShowCursor] = useState<boolean>(false);
+  const [showCursor, setShowCursor] = useState<boolean>(true);
 
-  // 演出世代計數器，用於支援「新訊息搶佔中斷 (Preemption)」
-  const generationRef = useRef<number>(0);
   const timersRef = useRef<Array<NodeJS.Timeout>>([]);
+  const activeGenerationRef = useRef<number>(0);
 
   const clearAllTimers = useCallback(() => {
     timersRef.current.forEach((t) => clearTimeout(t));
@@ -189,232 +151,182 @@ export default function OverlayCenterText({
     return timer;
   }, []);
 
-  /**
-   * 執行完整 5 階段視覺演繹狀態機（有機動態節奏）
-   */
-  const startLifecycle = useCallback(
-    (textToPlay: string, keywordsToKeep: string[]) => {
-      // 遞增 generation，即時終止前一次未完成的計時器與循環
-      const currentGen = ++generationRef.current;
-      clearAllTimers();
+  useEffect(() => {
+    const currentGen = ++activeGenerationRef.current;
+    clearAllTimers();
 
-      if (!textToPlay) {
-        setBeforeCursor(defaultText);
-        setAfterCursor("");
-        setShowCursor(false);
-        return;
-      }
-
-      console.log(`[OverlayCenterText] 開始演繹生命週期 (Gen: ${currentGen}, 長度: ${textToPlay.length})`);
-
-      // ====================================================================
-      // Step 1: 打字階段動態 (Humanized Typing - 遞迴 setTimeout)
-      // 從左至右逐字吐出 originalText，閃爍游標 _
-      // ====================================================================
+    // ========================================================================
+    // Phase 1 (0.0s – 12.0s，長度 12 秒)：沉澱凝視
+    // 以舒適、有呼吸感的擬人節奏打出全文，約在第 9~10 秒打完，
+    // 隨後在純白畫面上靜止停留約 2 秒，營造出重量壓到最底的凝視感
+    // ========================================================================
+    if (phase === TimelinePhase.PHASE_1_ACCUMULATE) {
       setBeforeCursor("");
       setAfterCursor("");
       setShowCursor(true);
 
+      const targetText = activeText;
       let charIdx = 0;
-      const typeNextChar = () => {
-        if (generationRef.current !== currentGen) return;
+
+      // 依字數微調打字基準速度，目標在第 9.5 秒（9~10 秒區間）完成打字
+      const pCount = (targetText.match(/[\s\p{P}]/gu) || []).length;
+      const totalPunctDelay = pCount * 550;
+      const availableCharTime = Math.max(3500, 9500 - totalPunctDelay);
+      const baseSpeed = Math.max(
+        40,
+        Math.min(135, Math.floor(availableCharTime / Math.max(1, targetText.length)))
+      );
+
+      const typeStep = () => {
+        if (activeGenerationRef.current !== currentGen) return;
 
         charIdx++;
-        const charJustTyped = textToPlay[charIdx - 1];
-        setBeforeCursor(textToPlay.slice(0, charIdx));
+        const charJustTyped = targetText[charIdx - 1];
+        setBeforeCursor(targetText.slice(0, charIdx));
         setAfterCursor("");
 
-        if (charIdx < textToPlay.length) {
-          // 基準 100~130ms + 隨機浮動 ±40ms + 標點符號額外思考停頓 400~650ms
-          const nextCharDelay = getHumanizedTypingDelay(charJustTyped, typingSpeed);
-          safeTimeout(typeNextChar, nextCharDelay);
+        if (charIdx < targetText.length) {
+          const delay = getHumanizedTypingDelay(charJustTyped, baseSpeed);
+          safeTimeout(typeStep, delay);
         } else {
-          // ==================================================================
-          // Step 2: 短暫駐留 (Pause/Hold)
-          // 完整句子印出後，駐留約 1.5 秒讓觀眾閱讀
-          // ==================================================================
-          safeTimeout(() => {
-            if (generationRef.current !== currentGen) return;
-            startSmartBackspace();
-          }, holdDuration);
+          // 約 9~10 秒打完，在畫面上靜止停留 2 秒凝視
+          setShowCursor(true);
         }
       };
 
-      // 啟動第一個字元的打字延遲
-      const initialTypeDelay = Math.round(100 + Math.random() * 30);
-      safeTimeout(typeNextChar, initialTypeDelay);
+      const initialDelay = Math.round(120 + Math.random() * 60);
+      safeTimeout(typeStep, initialDelay);
+    }
 
-      // ====================================================================
-      // Step 3: 智慧倒退刪除階段動態 (Selective Backspacing - 遞迴 setTimeout)
-      // 文字游標從字尾往前倒退刪除，遇關鍵字跳過不刪除，非關鍵字逐字退格
-      // ====================================================================
-      const startSmartBackspace = () => {
-        if (generationRef.current !== currentGen) return;
+    // ========================================================================
+    // Phase 2 (12.0s – 15.0s，長度 3 秒)：演算法斷裂與關鍵字爆發
+    // 2D 文字維持在畫面上，與背景 3D 炸出的關鍵字短暫重疊對照，不進行任何刪除
+    // ========================================================================
+    else if (phase === TimelinePhase.PHASE_2_RUPTURE) {
+      setBeforeCursor(activeText);
+      setAfterCursor("");
+      setShowCursor(true);
+    }
 
-        // 複製文字區塊陣列
-        const segments: TextSegment[] = parseTextSegments(textToPlay, keywordsToKeep).map(
-          (s) => ({ ...s })
-        );
+    // ========================================================================
+    // Phase 3 (15.0s – 21.0s，長度 6 秒)：倒退抹消與失重
+    // 從第 15 秒啟動倒退刪除（45~75ms），遇到屬於 keywords 詞彙跳過不刪（停頓 250~350ms）
+    // ========================================================================
+    else if (phase === TimelinePhase.PHASE_3_ERASE) {
+      setShowCursor(true);
 
-        const hasAnyKeyword = segments.some((s) => s.isKeyword);
+      const segments: TextSegment[] = parseTextSegments(activeText, activeKeywords).map(
+        (s) => ({ ...s })
+      );
 
-        const backspaceStep = () => {
-          if (generationRef.current !== currentGen) return;
+      const nonKwChars = segments
+        .filter((s) => !s.isKeyword)
+        .reduce((sum, s) => sum + s.text.length, 0);
 
-          // 尋找最後一個「非關鍵字」且「文字長度 > 0」的區塊
-          let targetIdx = -1;
-          for (let i = segments.length - 1; i >= 0; i--) {
-            if (!segments[i].isKeyword && segments[i].text.length > 0) {
-              targetIdx = i;
-              break;
-            }
+      // 基準刪除速率：確保在 4.5~5.0 秒內乾淨抹除非關鍵字
+      const baseDelSpeed = Math.max(
+        40,
+        Math.min(75, Math.floor(4500 / Math.max(1, nonKwChars)))
+      );
+
+      const backspaceStep = () => {
+        if (activeGenerationRef.current !== currentGen) return;
+
+        let targetIdx = -1;
+        for (let i = segments.length - 1; i >= 0; i--) {
+          if (!segments[i].isKeyword && segments[i].text.length > 0) {
+            targetIdx = i;
+            break;
           }
-
-          if (targetIdx !== -1) {
-            // 從該非關鍵字區塊字尾刪除 1 個字元
-            segments[targetIdx].text = segments[targetIdx].text.slice(0, -1);
-
-            // 組裝游標左側文字
-            const leftSegmentsText = segments
-              .slice(0, targetIdx)
-              .map((s) => s.text)
-              .join("");
-            const currentLeft = leftSegmentsText + segments[targetIdx].text;
-
-            // 組裝游標右側已保留之關鍵字文字
-            const preservedRightKeywords = segments
-              .slice(targetIdx + 1)
-              .filter((s) => s.isKeyword && s.text.length > 0)
-              .map((s) => s.text);
-            const currentRight =
-              preservedRightKeywords.length > 0
-                ? " " + preservedRightKeywords.join(" ")
-                : "";
-
-            setBeforeCursor(currentLeft);
-            setAfterCursor(currentRight);
-
-            // 判斷下一次刪除的延遲時間
-            let nextDelay = getSelectiveBackspacingDelay(backspaceSpeed);
-
-            // 若當前非關鍵字區塊已剛好被完全清空
-            if (segments[targetIdx].text.length === 0) {
-              // 檢查左側是否還有未刪除的非關鍵字區塊
-              let hasMoreLeftToDelete = false;
-              for (let i = targetIdx - 1; i >= 0; i--) {
-                if (!segments[i].isKeyword && segments[i].text.length > 0) {
-                  hasMoreLeftToDelete = true;
-                  break;
-                }
-              }
-
-              // 若左側還有非關鍵字需刪除，代表此時游標正迎面碰到並跳過位於中間的保留關鍵字
-              // 在此節點短暫停頓 250ms ~ 350ms，做出詞彙被挑選留下的頓挫感
-              if (hasMoreLeftToDelete) {
-                nextDelay = getKeywordRecognitionPause();
-              }
-            }
-
-            safeTimeout(backspaceStep, nextDelay);
-          } else {
-            // 所有非關鍵字刪除完畢，只剩下被萃取出的關鍵字
-            const finalKeywords = segments
-              .filter((s) => s.isKeyword && s.text.length > 0)
-              .map((s) => s.text);
-
-            const resultText =
-              finalKeywords.length > 0
-                ? finalKeywords.join(" ")
-                : hasAnyKeyword
-                ? ""
-                : keywordsToKeep.join(" ");
-
-            setBeforeCursor(resultText);
-            setAfterCursor("");
-
-            // ================================================================
-            // Step 4: 動態結束與狀態回報
-            // 倒退刪除完成、只剩關鍵字時，停頓約 2 秒，發送 DEVICE_IDLE 給 Server
-            // ================================================================
-            safeTimeout(() => {
-              if (generationRef.current !== currentGen) return;
-              console.log("[OverlayCenterText] 倒退刪除演繹完成，回報 DEVICE_IDLE");
-              reportIdle();
-
-              // ==============================================================
-              // Step 5: 閒置重播循環 (Idle Loop)
-              // 若 Server 暫無下一筆新訊息可派發，維持當前內容，自動重新開始重播
-              // ==============================================================
-              safeTimeout(() => {
-                if (generationRef.current !== currentGen) return;
-                console.log("[OverlayCenterText] 進入 Idle Loop 重播");
-                startLifecycle(textToPlay, keywordsToKeep);
-              }, 600);
-            }, endPauseDuration);
-          }
-        };
-
-        // 啟動倒退刪除：若句子尾部本身就是關鍵字，初始時就直接碰到關鍵字，先進行短暫頓挫停頓
-        let initialDeleteDelay = getSelectiveBackspacingDelay(backspaceSpeed);
-        if (segments.length > 0 && segments[segments.length - 1].isKeyword) {
-          initialDeleteDelay = getKeywordRecognitionPause();
         }
 
-        safeTimeout(backspaceStep, initialDeleteDelay);
+        if (targetIdx !== -1) {
+          segments[targetIdx].text = segments[targetIdx].text.slice(0, -1);
+
+          const leftText =
+            segments.slice(0, targetIdx).map((s) => s.text).join("") +
+            segments[targetIdx].text;
+
+          const rightKeywords = segments
+            .slice(targetIdx + 1)
+            .filter((s) => s.isKeyword && s.text.length > 0)
+            .map((s) => s.text);
+
+          const rightText =
+            rightKeywords.length > 0 ? " " + rightKeywords.join(" ") : "";
+
+          setBeforeCursor(leftText);
+          setAfterCursor(rightText);
+
+          let nextDelay = getSelectiveBackspacingDelay(baseDelSpeed);
+
+          if (segments[targetIdx].text.length === 0) {
+            let hasMoreLeft = false;
+            for (let i = targetIdx - 1; i >= 0; i--) {
+              if (!segments[i].isKeyword && segments[i].text.length > 0) {
+                hasMoreLeft = true;
+                break;
+              }
+            }
+            if (hasMoreLeft) {
+              nextDelay = getKeywordRecognitionPause();
+            }
+          }
+
+          safeTimeout(backspaceStep, nextDelay);
+        } else {
+          const finalKw = segments
+            .filter((s) => s.isKeyword && s.text.length > 0)
+            .map((s) => s.text);
+
+          const finalText =
+            finalKw.length > 0 ? finalKw.join(" ") : activeKeywords.join(" ");
+
+          setBeforeCursor(finalText);
+          setAfterCursor("");
+        }
       };
-    },
-    [
-      defaultText,
-      typingSpeed,
-      backspaceSpeed,
-      holdDuration,
-      endPauseDuration,
-      clearAllTimers,
-      safeTimeout,
-      reportIdle,
-    ]
-  );
 
-  // 監聽新訊息抵達：新訊息立即搶佔中斷 (Preemption) 並從頭開始演出
-  const lastPayloadIdRef = useRef<string | null>(null);
-  const lastTextRef = useRef<string>("");
+      const initialDelay = getSelectiveBackspacingDelay(baseDelSpeed);
+      safeTimeout(backspaceStep, initialDelay);
+    }
 
-  useEffect(() => {
-    const currentId = activePayload?.id || null;
-
-    // 當收到了新的 Payload ID，或是文字內容發生改變
-    if (activeText && (currentId !== lastPayloadIdRef.current || activeText !== lastTextRef.current)) {
-      lastPayloadIdRef.current = currentId;
-      lastTextRef.current = activeText;
-      startLifecycle(activeText, activeKeywords);
-    } else if (!activeText && !lastTextRef.current) {
-      setBeforeCursor(defaultText);
+    // ========================================================================
+    // Phase 4 (21.0s – 25.0s，長度 4 秒)：殘留與懸空
+    // 2D 浮層只孤立保留被萃取的 3～5 個關鍵字，無聲停滯於畫面中央
+    // ========================================================================
+    else if (phase === TimelinePhase.PHASE_4_RESIDUAL) {
+      const remainingKeywordsText = activeKeywords.join("   ");
+      setBeforeCursor(remainingKeywordsText);
       setAfterCursor("");
       setShowCursor(false);
     }
-  }, [activePayload, activeText, activeKeywords, defaultText, startLifecycle]);
 
-  // 元件卸載清理
-  useEffect(() => {
     return () => {
-      generationRef.current++;
       clearAllTimers();
     };
-  }, [clearAllTimers]);
+  }, [
+    phase,
+    cycleIndex,
+    activeText,
+    activeKeywords,
+    clearAllTimers,
+    safeTimeout,
+  ]);
 
   return (
     <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none select-none px-4">
       <div
-        className="max-w-[88vw] px-4 py-2 bg-black/80 backdrop-blur-md border border-white/15 rounded-sm shadow-md transition-all duration-300"
+        className="max-w-[88vw] px-5 py-3 bg-black/85 backdrop-blur-md border border-white/20 rounded-sm shadow-2xl transition-all duration-300"
         style={{
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
         }}
       >
-        <span className="font-mono text-xs sm:text-sm tracking-[0.35em] text-white uppercase font-medium inline-block text-center break-words">
+        <span className="font-mono text-xs sm:text-sm tracking-[0.35em] text-white uppercase font-medium inline-block text-center break-words leading-relaxed">
           <span>{beforeCursor}</span>
           {showCursor && (
-            <span className="inline-block animate-pulse ml-0.5 opacity-80">_</span>
+            <span className="inline-block animate-pulse ml-0.5 opacity-90 text-white">_</span>
           )}
           <span>{afterCursor}</span>
         </span>

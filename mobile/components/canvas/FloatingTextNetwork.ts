@@ -1,77 +1,46 @@
 import * as THREE from "three";
 import { createTextSprite, calculateStringBits, TextSpriteResult } from "./createTextSprite";
+import { TimelinePhase } from "../timeline/PerformanceTimeline";
 
 export interface NodeData {
   id: number;
   label: string;
-  textIndex: number;       // 該文字在標籤清單中的 index 數 (0, 1, 2, ...)
-  bits: number;            // 該文字計算所得之 UTF-8 位元數 (bits)
+  textIndex: number;
+  bits: number;
   basePos: THREE.Vector3;
   currentPos: THREE.Vector3;
-  startPos: THREE.Vector3;  // 當前拍起始位置
-  targetPos: THREE.Vector3; // 當前拍目標位置
+  startPos: THREE.Vector3;
+  targetPos: THREE.Vector3;
   spriteResult: TextSpriteResult;
 }
 
-/**
- * 🎛️ 預設階層式節奏與彈簧阻尼常數（Hierarchical Rhythmic Beats Configuration）
- */
 export const RHYTHM_CONFIG = {
-  /** 基本拍點頻率（秒 / 拍）：每 0.39 秒為 1 拍 */
   BEAT_INTERVAL: 0.39,
-
-  /** 1. 小變化躍遷跨度（Base Beat，每 1 拍位移到鄰近新位置） */
   SMALL_AMP: 0.16,
-
-  /** 2. 中變化躍遷跨度（Bar Beat，每 4 拍小節群體偏向躍遷新位置） */
   MID_AMP: 0.45,
-
-  /** 3. 大變化躍遷跨度（Phrase Drop，每 8 拍大空間重組跨距新位置） */
   LARGE_AMP: 1.05,
-
-  /** 彈簧阻尼衰減係數（數值越大衰減越快、停頓頓挫越乾脆） */
   DAMPING: 5.0,
-
-  /** 彈簧張力 / 回彈震盪頻率（數值越大回彈抖動頻率越高） */
   SPRING_TENSION: 1.2,
 };
 
 export interface FloatingTextNetworkOptions {
-  /** 文字大小縮放（預設 0.46） */
   textScale?: number;
-  /** 文字畫布字級大小（預設 30） */
   fontSize?: number;
-  /** 整體初始空間分佈半徑 / 飄散基準範圍（預設 1.5） */
   spreadRadius?: number;
-
-  /** 是否在文字下方顯示 index 數與 bits 位元數（預設 true） */
   showBitsInfo?: boolean;
-  /** 下方 index 與 bits 小字字級縮放比例（預設 0.42） */
   subTextRatio?: number;
 
-  // --- 階層式節奏與彈簧物理參數 ---
-  /** 基本打拍間隔（秒 / 拍）：預設 0.39 秒 */
   beatInterval?: number;
-  /** 小變化躍遷跨度（每 1 拍）：預設 0.16 */
   smallAmp?: number;
-  /** 中變化躍遷跨度（每 4 拍）：預設 0.45 */
   midAmp?: number;
-  /** 大變化躍遷跨度（每 8 拍）：預設 1.05 */
   largeAmp?: number;
-  /** 彈簧阻尼係數：預設 5.0 */
   damping?: number;
-  /** 彈簧張力頻率：預設 1.2 */
   springTension?: number;
 
-  /** 連線聚散距離閾值（預設 2.1） */
   connectDistance?: number;
-  /** 節點總數量（預設 5） */
   nodeCount?: number;
-  /** 節點標籤字串陣列 */
   labels?: string[];
-  /** 線條顏色 */
   lineColor?: number;
-  /** 文字顏色 */
   textColor?: string;
 }
 
@@ -79,13 +48,17 @@ export interface FloatingTextNetworkInstance {
   group: THREE.Group;
   nodes: NodeData[];
   update: (time: number) => void;
+  updateWithTimeline: (
+    time: number,
+    phase: TimelinePhase,
+    phaseTime: number,
+    totalTime: number,
+    activeKeywords?: string[]
+  ) => void;
   dispose: () => void;
   updateKeywords: (newKeywords: string[]) => void;
 }
 
-/**
- * 快速確定性三維亂數向量生成器（基於 seed）
- */
 function getPseudoVector3(seed: number): THREE.Vector3 {
   const s1 = seed * 12.9898 + 78.233;
   const s2 = seed * 39.346 + 11.135;
@@ -104,10 +77,6 @@ function getPseudoVector3(seed: number): THREE.Vector3 {
   return v.normalize();
 }
 
-/**
- * 阻尼彈簧躍遷進度曲線（Damped Spring Step-Hop Progress）
- * p 從 0 到 1：以瞬間初速度快速爆發移向目標，伴隨物理回彈過衝，並在拍尾完全定格於 1.0 (新目標點)
- */
 function calculateSpringHopProgress(
   p: number,
   damping: number,
@@ -116,19 +85,19 @@ function calculateSpringHopProgress(
   if (p <= 0) return 0;
   if (p >= 1) return 1;
 
-  // 指數衰減 x 彈簧振盪
   const decay = Math.exp(-damping * p);
   const oscillation = Math.cos(tension * Math.PI * 2 * p);
-
-  // 結尾遮罩保證拍尾精確抵達 1.0
   const finishEnvelope = 1 - Math.pow(p, 3);
-  const progress = 1 - decay * oscillation * finishEnvelope;
-
-  return progress;
+  return 1 - decay * oscillation * finishEnvelope;
 }
 
 /**
- * 建立 3D 空間中拍點躍遷至新位置 (Real Relocation on Beats) 的文字節點與同步連線網絡
+ * 建立並管理 3D 關鍵字節點與黑色直線網絡 (FloatingTextNetwork)
+ * 時間軸 25 秒規範：
+ * Phase 1 (0–12s)：完全隱藏，保持純白畫布
+ * Phase 2 (12–15s，12.0s 瞬間爆發)：載入 keywords 生成 Sprite 與 [XX bits] 標籤，自螢幕深處猛力拋出 (Spring Drop)，拉出黑色直線網絡
+ * Phase 3 (15–21s)：隨 2D 文本倒退抹消，3D 直線連線逐漸稀疏淡出 (0.85 -> 0.0)
+ * Phase 4 (21–25s)：連線完全消失，3～5 個關鍵字在純白空間中緩慢漂浮自轉
  */
 export function createFloatingTextNetwork(
   options: FloatingTextNetworkOptions = {}
@@ -146,16 +115,16 @@ export function createFloatingTextNetwork(
     damping = RHYTHM_CONFIG.DAMPING,
     springTension = RHYTHM_CONFIG.SPRING_TENSION,
     connectDistance = 2.1,
-    nodeCount = 5,
     labels = ["無感", "剩餘價值", "每天", "灰色", "DAF"],
     lineColor = 0x000000,
     textColor = "#000000",
   } = options;
 
   const group = new THREE.Group();
+  group.visible = false;
+
   const nodes: NodeData[] = [];
 
-  // 2. 建立動態連線網路（預先配置足夠容納節點的 BufferGeometry，避免頻繁 reallocation）
   const MAX_PAIRS = 300;
   const linePositions = new Float32Array(MAX_PAIRS * 2 * 3);
 
@@ -167,7 +136,7 @@ export function createFloatingTextNetwork(
   const lineMaterial = new THREE.LineBasicMaterial({
     color: lineColor,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.0,
     depthWrite: false,
   });
 
@@ -175,18 +144,15 @@ export function createFloatingTextNetwork(
   lineSegments.renderOrder = 5;
   group.add(lineSegments);
 
-  // 物理彈簧重組（Drop/Jump）狀態控制
   let isDropping = false;
   let dropProgress = 0;
-  const DROP_DURATION = 1.1; // 降臨彈簧時間（秒）
+  const DROP_DURATION = 1.2;
   let lastTime = 0;
   let lastProcessedBeat = -1;
 
-  /**
-   * 重新構建文字節點與位元標籤，並觸發物理彈簧重組（Drop/Jump）
-   */
-  const rebuildNodes = (targetLabels: string[], triggerDrop: boolean = true) => {
-    // 清除舊節點 Sprite 與 GPU 貼圖資源
+  let hasExplodedInPhase2 = false;
+
+  const rebuildNodes = (targetLabels: string[], triggerExplosion: boolean = true) => {
     nodes.forEach((n) => {
       group.remove(n.spriteResult.sprite);
       n.spriteResult.dispose();
@@ -194,14 +160,14 @@ export function createFloatingTextNetwork(
     nodes.length = 0;
 
     const filtered = targetLabels.filter((l) => typeof l === "string" && l.trim().length > 0);
-    const effectiveLabels = filtered.length > 0 ? filtered : ["無感", "剩餘價值", "每天", "灰色", "DAF"];
+    const effectiveLabels =
+      filtered.length > 0 ? filtered : ["無感", "剩餘價值", "每天", "灰色", "DAF"];
     const count = effectiveLabels.length;
 
     for (let i = 0; i < count; i++) {
       const textIndex = i;
       const label = effectiveLabels[i];
       const bits = calculateStringBits(label);
-      // 依照規格生成 UTF-8 位元數標籤（如 [48 bits]）
       const subText = showBitsInfo ? `[${bits} bits]` : undefined;
 
       const phi = Math.acos(1 - (2 * (i + 0.5)) / count);
@@ -218,12 +184,12 @@ export function createFloatingTextNetwork(
       let startPos: THREE.Vector3;
       let currentPos: THREE.Vector3;
 
-      if (triggerDrop) {
-        // 高空躍遷降臨 + 外圍爆散向量，呈現新關鍵字降臨之視覺張力
+      if (triggerExplosion) {
+        // 從螢幕深處猛力拋出 (-Z 軸深處)
         startPos = new THREE.Vector3(
-          x0 * 2.3 + Math.sin(i * 3.7) * 1.5,
-          y0 + 5.2 + Math.cos(i * 2.1) * 2.2,
-          z0 * 2.3 + Math.cos(i * 1.9) * 1.5
+          x0 * 3.5 + Math.sin(i * 2.7) * 2.5,
+          y0 * 3.0 + 4.5 * Math.cos(i * 2.1),
+          z0 - 25.0 + Math.sin(i * 3.1) * 3.0 // 深處
         );
         currentPos = startPos.clone();
       } else {
@@ -231,7 +197,6 @@ export function createFloatingTextNetwork(
         currentPos = basePos.clone();
       }
 
-      // 建立文字貼圖 Sprite
       const spriteResult = createTextSprite(label, {
         fontSize,
         color: textColor,
@@ -255,18 +220,14 @@ export function createFloatingTextNetwork(
       });
     }
 
-    if (triggerDrop) {
+    if (triggerExplosion) {
       isDropping = true;
       dropProgress = 0;
     }
   };
 
-  // 初始化預設節點（不觸發強制墜落）
   rebuildNodes(labels, false);
 
-  /**
-   * 依據節拍階層（每 1 拍小跳、每 4 拍中跳、每 8 拍大跳）計算節點的「下一個真實三維空間座標」
-   */
   const computeNextTarget = (node: NodeData, beatIndex: number) => {
     const isPhraseDrop = beatIndex % 8 === 0;
     const isBarBeat = !isPhraseDrop && beatIndex % 4 === 0;
@@ -276,27 +237,21 @@ export function createFloatingTextNetwork(
     let hopDistance: number;
 
     if (isPhraseDrop) {
-      // [大變化 Phrase Drop]：向外大幅度跨域重組跳躍（X, Y, Z 三維立體大幅躍遷）
       const randomSeedDir = getPseudoVector3(node.id * 89.3 + beatIndex * 41.7);
       const tangentialDir = new THREE.Vector3(-node.currentPos.y, node.currentPos.x, node.currentPos.z * 0.7).normalize();
       hopDir = randomSeedDir.multiplyScalar(0.7).addScaledVector(tangentialDir, 0.5).normalize();
       hopDistance = largeAmp;
     } else if (isBarBeat) {
-      // [中變化 Bar Beat]：小節群體偏向位移跳躍
       const groupDir = getPseudoVector3(barIndex * 71.3);
       const indivDir = getPseudoVector3(node.id * 37.1 + beatIndex * 19.3);
       hopDir = groupDir.multiplyScalar(0.65).addScaledVector(indivDir, 0.45).normalize();
       hopDistance = midAmp;
     } else {
-      // [小變化 Base Beat]：每 1 拍向新目標點清脆位移
       hopDir = getPseudoVector3(node.id * 47.9 + beatIndex * 13.7);
       hopDistance = smallAmp;
     }
 
-    // 計算新目標點：從當前目標點起步，加上帶方向性的位移向量
     const nextPos = node.targetPos.clone().addScaledVector(hopDir, hopDistance);
-
-    // 限制三維分佈空間，使其維持在合理的視覺半徑內
     const minR = spreadRadius * 0.7;
     const maxR = spreadRadius * 1.35;
     const len = nextPos.length();
@@ -306,21 +261,70 @@ export function createFloatingTextNetwork(
       nextPos.setLength(maxR);
     }
 
-    // 賦予柔性歸位張力，避免節點無限隨機遊走偏離中心
     nextPos.lerp(node.basePos, 0.12);
-
     return nextPos;
   };
 
-  // 3. 節拍器計數器與躍遷更新
-  const update = (time: number) => {
-    const currentNodeCount = nodes.length;
-    if (currentNodeCount === 0) return;
-
+  const updateWithTimeline = (
+    time: number,
+    phase: TimelinePhase,
+    phaseTime: number,
+    totalTime: number,
+    activeKeywords?: string[]
+  ) => {
     const dt = lastTime > 0 ? Math.min(0.1, time - lastTime) : 0.016;
     lastTime = time;
 
-    // 若正處於新關鍵字降臨物理彈簧重組階段 (Drop/Jump)
+    // ========================================================================
+    // Phase 1 (0.0s – 12.0s)：沉澱凝視 -> 純白底，完全隱藏 3D 網絡與連線
+    // ========================================================================
+    if (phase === TimelinePhase.PHASE_1_ACCUMULATE) {
+      group.visible = false;
+      lineMaterial.opacity = 0.0;
+      hasExplodedInPhase2 = false;
+      return;
+    }
+
+    // ========================================================================
+    // Phase 2 (12.0s – 15.0s)：演算法斷裂與關鍵字爆發
+    // 12.0s 瞬間爆發：彈簧物理阻尼 (Spring Drop) 從螢幕深處猛力拋出，拉出黑色直線網絡
+    // ========================================================================
+    if (phase === TimelinePhase.PHASE_2_RUPTURE) {
+      if (!hasExplodedInPhase2) {
+        hasExplodedInPhase2 = true;
+        console.log(
+          `[FloatingTextNetwork] Phase 2 (12.0s 瞬間爆發)：彈射進場！關鍵字: [${(
+            activeKeywords || labels
+          ).join(", ")}]`
+        );
+        rebuildNodes(activeKeywords && activeKeywords.length > 0 ? activeKeywords : labels, true);
+        group.visible = true;
+        lineMaterial.opacity = 0.85;
+      }
+    }
+
+    // ========================================================================
+    // Phase 3 (15.0s – 21.0s，長度 6 秒)：倒退抹消與失重
+    // 3D 網絡在背景環繞，隨著 2D 文字被刪除，3D 直線連線逐漸稀疏淡出 (0.85 -> 0.0)
+    // ========================================================================
+    if (phase === TimelinePhase.PHASE_3_ERASE) {
+      group.visible = true;
+      const eraseProgress = Math.min(1.0, Math.max(0.0, phaseTime / 6.0)); // 0 -> 1 (6秒)
+      lineMaterial.opacity = Math.max(0.0, 0.85 * (1.0 - eraseProgress));
+    }
+
+    // ========================================================================
+    // Phase 4 (21.0s – 25.0s，長度 4 秒)：殘留與懸空
+    // 連線完全消失，3～5 個關鍵字在純白空間中緩慢漂浮自轉
+    // ========================================================================
+    if (phase === TimelinePhase.PHASE_4_RESIDUAL) {
+      group.visible = true;
+      lineMaterial.opacity = 0.0;
+    }
+
+    const currentNodeCount = nodes.length;
+    if (currentNodeCount === 0) return;
+
     if (isDropping) {
       dropProgress += dt / DROP_DURATION;
       const springProgress = calculateSpringHopProgress(
@@ -337,24 +341,34 @@ export function createFloatingTextNetwork(
 
       if (dropProgress >= 1) {
         isDropping = false;
-        // 降臨完畢，使 startPos 定格在 targetPos，並同步拍點
         for (let i = 0; i < currentNodeCount; i++) {
           nodes[i].startPos.copy(nodes[i].targetPos);
         }
         const safeInterval = Math.max(0.02, beatInterval);
         lastProcessedBeat = Math.floor(time / safeInterval);
       }
+    } else if (phase === TimelinePhase.PHASE_4_RESIDUAL) {
+      // Phase 4 緩慢漂浮自轉懸空
+      for (let i = 0; i < currentNodeCount; i++) {
+        const node = nodes[i];
+        const driftAngle = totalTime * 0.28 + i * ((Math.PI * 2) / currentNodeCount);
+        const radius = spreadRadius * (0.95 + 0.08 * Math.sin(totalTime * 0.4 + i));
+        node.currentPos.set(
+          radius * Math.cos(driftAngle),
+          node.basePos.y + 0.15 * Math.sin(totalTime * 0.6 + i * 1.5),
+          radius * Math.sin(driftAngle)
+        );
+        node.spriteResult.sprite.position.copy(node.currentPos);
+      }
     } else {
-      // 正常階層式音樂節拍脈衝
+      // Phase 2 / Phase 3 常規節拍躍遷更新
       const safeInterval = Math.max(0.02, beatInterval);
       const beatIndex = Math.floor(time / safeInterval);
       const beatElapsed = time - beatIndex * safeInterval;
       const normalizedBeatTime = Math.min(1, Math.max(0, beatElapsed / safeInterval));
 
-      // 當拍點切換時（進入新的一拍），更新所有節點的起點與新的空間目標位置
       if (beatIndex !== lastProcessedBeat) {
         lastProcessedBeat = beatIndex;
-
         for (let i = 0; i < currentNodeCount; i++) {
           const node = nodes[i];
           node.startPos.copy(node.targetPos);
@@ -363,7 +377,6 @@ export function createFloatingTextNetwork(
         }
       }
 
-      // 計算彈簧衝擊與回彈進度
       const springProgress = calculateSpringHopProgress(
         normalizedBeatTime,
         damping,
@@ -377,58 +390,66 @@ export function createFloatingTextNetwork(
       }
     }
 
-    // 3.2 線條頂點 100% 同步更新
-    let segmentCount = 0;
-    const posAttr = positionAttribute;
+    // 連線幾何頂點更新（若 opacity > 0）
+    if (lineMaterial.opacity > 0.005) {
+      let segmentCount = 0;
+      const posAttr = positionAttribute;
 
-    for (let i = 0; i < currentNodeCount; i++) {
-      const posA = nodes[i].currentPos;
+      // 隨著連線淡出，可動態調整連線距離門檻使網絡連線更顯稀疏
+      const effectiveDistance =
+        phase === TimelinePhase.PHASE_3_ERASE
+          ? connectDistance * (0.6 + 0.4 * (1.0 - phaseTime / 6.0))
+          : connectDistance;
 
-      for (let j = i + 1; j < currentNodeCount; j++) {
-        const posB = nodes[j].currentPos;
-        const dist = posA.distanceTo(posB);
+      for (let i = 0; i < currentNodeCount; i++) {
+        const posA = nodes[i].currentPos;
 
-        // 實時依據即時新座標連線
-        if (dist <= connectDistance && segmentCount < MAX_PAIRS) {
+        for (let j = i + 1; j < currentNodeCount; j++) {
+          const posB = nodes[j].currentPos;
+          const dist = posA.distanceTo(posB);
+
+          if (dist <= effectiveDistance && segmentCount < MAX_PAIRS) {
+            const vIdx = segmentCount * 2;
+            posAttr.setXYZ(vIdx, posA.x, posA.y, posA.z);
+            posAttr.setXYZ(vIdx + 1, posB.x, posB.y, posB.z);
+            segmentCount++;
+          }
+        }
+      }
+
+      // 基礎連通骨架
+      if (segmentCount < currentNodeCount && currentNodeCount > 1 && lineMaterial.opacity > 0.2) {
+        for (let i = 0; i < currentNodeCount; i++) {
+          if (segmentCount >= MAX_PAIRS) break;
+          const nextIdx = (i + 1) % currentNodeCount;
+          const posA = nodes[i].currentPos;
+          const posB = nodes[nextIdx].currentPos;
+
           const vIdx = segmentCount * 2;
           posAttr.setXYZ(vIdx, posA.x, posA.y, posA.z);
           posAttr.setXYZ(vIdx + 1, posB.x, posB.y, posB.z);
           segmentCount++;
         }
       }
+
+      posAttr.needsUpdate = true;
+      lineGeometry.setDrawRange(0, segmentCount * 2);
+    } else {
+      lineGeometry.setDrawRange(0, 0);
     }
-
-    // 確保網絡骨架（在兩兩距離過遠時維持連通度）
-    if (segmentCount < currentNodeCount && currentNodeCount > 1) {
-      for (let i = 0; i < currentNodeCount; i++) {
-        if (segmentCount >= MAX_PAIRS) break;
-        const nextIdx = (i + 1) % currentNodeCount;
-        const posA = nodes[i].currentPos;
-        const posB = nodes[nextIdx].currentPos;
-
-        const vIdx = segmentCount * 2;
-        posAttr.setXYZ(vIdx, posA.x, posA.y, posA.z);
-        posAttr.setXYZ(vIdx + 1, posB.x, posB.y, posB.z);
-        segmentCount++;
-      }
-    }
-
-    posAttr.needsUpdate = true;
-    lineGeometry.setDrawRange(0, segmentCount * 2);
   };
 
-  update(0);
+  const update = (time: number) => {
+    updateWithTimeline(time, TimelinePhase.PHASE_2_RUPTURE, 1.0, 13.0);
+  };
 
-  // 動態更新關鍵字 API：替換 Sprite、重新計算 bits、並觸發彈簧 Drop/Jump 重組
   const updateKeywords = (newKeywords: string[]) => {
     if (!newKeywords || !Array.isArray(newKeywords) || newKeywords.length === 0) return;
     const valid = newKeywords.filter((k) => typeof k === "string" && k.trim().length > 0);
     if (valid.length === 0) return;
-    console.log(`[FloatingTextNetwork] 接收新關鍵字: [${valid.join(", ")}]，觸發物理彈簧降臨 (Drop/Jump)`);
     rebuildNodes(valid, true);
   };
 
-  // 4. 清理卸載
   const dispose = () => {
     nodes.forEach((n) => {
       group.remove(n.spriteResult.sprite);
@@ -444,6 +465,7 @@ export function createFloatingTextNetwork(
     group,
     nodes,
     update,
+    updateWithTimeline,
     dispose,
     updateKeywords,
   };

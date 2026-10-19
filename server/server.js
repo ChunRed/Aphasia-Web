@@ -44,40 +44,11 @@ if (GEMINI_API_KEY) {
 	}
 }
 
+// 3. 官方 @google/genai SDK 極簡設定（完全對齊 Google AI Studio Playground）
 const geminiConfig = {
-	// 1. 系統提示詞
 	systemInstruction: SYSTEM_INSTRUCTION,
-
-	// 2. 結構化 JSON 輸出與 Schema 約束
 	responseMimeType: 'application/json',
-	responseSchema: {
-		type: 'OBJECT',
-		properties: {
-			keywords: {
-				type: 'ARRAY',
-				items: {
-					type: 'STRING',
-				},
-				description: '3 to 5 keywords extracted from the diary entry',
-				minItems: 3,
-				maxItems: 5,
-			},
-		},
-		required: ['keywords'],
-	},
-
-	// 3. 模型推論參數控制
-	temperature: 0.2, // 低隨機性，確保遵守抽取規則與權重排序
-
-	// 4. 思考預算控制 (Thinking Budget)
-	// 將 thinking 調到最低（設為 minimal 1），降低延遲並避免浪費 token
-	thinkingConfig: {
-		thinkingBudget: 1,
-	},
-
-	// 5. 輸出 Token 上限
-	// 避免過小導致 JSON 被截斷，建議設 500 ~ 1000 足以容納完整陣列
-	maxOutputTokens: 1000,
+	temperature: 0.2,
 };
 
 // 輔助函式：生成唯一 ID 與 Fallback UUID
@@ -95,8 +66,38 @@ const generateMessageId = () => {
 	return 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
 };
 
-// 輔助函式：呼叫 Gemini API 分析文字（安全解析與型別檢查，支援 503 尖峰自動退避重試）
-const GEMINI_TIMEOUT_MS = 35000;
+/**
+ * 敏感詞與髒話過濾正則（確保本地保底抽取時絕不選中不雅詞彙）
+ */
+const PROFANITY_REGEX = /幹|操|靠北|靠杯|他媽|三小|白痴|白癡|智障|機掰|雞掰|賤人|混蛋|王八|死八婆|fuck|shit|bitch|asshole|cunt/i;
+
+/**
+ * 輔助函式：從原文中切取 3 個詞作為備用關鍵字保底（過濾髒話，永不拋錯）
+ */
+function extractFallbackKeywords(text) {
+	if (!text || typeof text !== 'string') {
+		return ['紀錄', '片刻', '日常'];
+	}
+	const segments = text
+		.split(/[\s，。！？、…—～：；,.!?;:\n\t]+/u)
+		.map((s) => s.trim())
+		.filter((s) => s.length >= 2 && !PROFANITY_REGEX.test(s));
+
+	const unique = Array.from(new Set(segments));
+	if (unique.length >= 3) {
+		return unique.slice(0, 3);
+	}
+	const defaults = ['紀錄', '片刻', '日常'];
+	for (const d of defaults) {
+		if (!unique.includes(d) && unique.length < 3) {
+			unique.push(d);
+		}
+	}
+	return unique.slice(0, 3);
+}
+
+// 輔助函式：呼叫 Gemini API 分析文字（安全極簡呼叫，支援短暫尖峰重試）
+const GEMINI_TIMEOUT_MS = 25000;
 async function callGeminiSingle(text, config) {
 	const timeoutPromise = new Promise((_, reject) =>
 		setTimeout(() => reject(new Error('Gemini API 請求逾時')), GEMINI_TIMEOUT_MS)
@@ -111,8 +112,8 @@ async function callGeminiSingle(text, config) {
 
 async function analyzeWithGemini(text) {
 	if (!ai) {
-		console.warn('[Gemini] SDK 尚未初始化，使用預設標籤');
-		return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
+		console.warn('[Gemini] 未初始化 SDK，啟用保底關鍵字');
+		return { keywords: extractFallbackKeywords(text), isFallback: true };
 	}
 
 	try {
@@ -122,64 +123,42 @@ async function analyzeWithGemini(text) {
 				response = await callGeminiSingle(text, geminiConfig);
 				break;
 			} catch (err) {
-				const is503 = err.message && (err.message.includes('503') || err.message.includes('high demand'));
-				if (is503 && attempt < 2) {
-					console.warn(`[Gemini] 遇到 503 尖峰流量，等待 1.5 秒後進行重試...`);
-					await new Promise((r) => setTimeout(r, 1500));
-					continue;
+				console.warn(`[Gemini] 第 ${attempt} 次呼叫失敗: ${err.message}`);
+				if (attempt < 2) {
+					await new Promise((r) => setTimeout(r, 1200));
 				}
-				console.warn(`[Gemini] 初次請求失敗 (${err.message})，使用降級設定重試...`);
-				const altConfig = { ...geminiConfig };
-				delete altConfig.thinkingConfig;
-				for (let altAttempt = 1; altAttempt <= 2; altAttempt++) {
-					try {
-						response = await callGeminiSingle(text, altConfig);
-						break;
-					} catch (altErr) {
-						if (altAttempt < 2) {
-							await new Promise((r) => setTimeout(r, 1500));
-							continue;
-						}
-						throw altErr;
-					}
-				}
-				break;
 			}
 		}
 
+		let keywords = [];
 		const rawText = response && response.text ? response.text.trim() : '';
 
-		if (!rawText) {
-			console.warn('[Gemini] 回傳內容為空，使用預設標籤');
-			return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
-		}
-
-		// 安全解析 JSON
-		let parsed;
-		try {
-			parsed = JSON.parse(rawText);
-		} catch (parseErr) {
-			console.warn('[Gemini] JSON.parse 失敗:', parseErr.message, 'Raw text:', rawText);
-			return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
-		}
-
-		// 型別檢查與清洗：確保為字串陣列且非空
-		if (parsed && Array.isArray(parsed.keywords)) {
-			const sanitizedKeywords = parsed.keywords
-				.filter((k) => typeof k === 'string')
-				.map((k) => k.trim())
-				.filter(Boolean);
-
-			if (sanitizedKeywords.length > 0) {
-				return { keywords: sanitizedKeywords, isFallback: false };
+		if (rawText) {
+			try {
+				const data = JSON.parse(rawText);
+				keywords = Array.isArray(data.keywords)
+					? data.keywords
+						.filter((k) => typeof k === 'string')
+						.map((k) => k.trim())
+						.filter(Boolean)
+					: [];
+			} catch (parseErr) {
+				console.warn('[Gemini] JSON parse fallback triggered:', parseErr.message);
 			}
 		}
 
-		console.warn('[Gemini] 回傳格式不符合預期 (無有效 keywords 陣列):', parsed);
-		return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
+		// 保底：若解析出的關鍵字為空，自動從原文切 3 個字詞補上，永不拋出錯誤
+		if (!keywords || keywords.length === 0) {
+			keywords = extractFallbackKeywords(text);
+			console.log(`[Gemini] 啟用保底關鍵字: [${keywords.join(', ')}]`);
+			return { keywords, isFallback: true };
+		}
+
+		return { keywords, isFallback: false };
 	} catch (err) {
-		console.error(`[Gemini] 分析過程發生例外 (${err.message})，觸發 Fallback`);
-		return { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
+		console.error(`[Gemini] 分析過程發生例外 (${err.message})，啟用保底關鍵字`);
+		const fallbackKw = extractFallbackKeywords(text);
+		return { keywords: fallbackKw, isFallback: true };
 	}
 }
 
@@ -336,20 +315,15 @@ async function processQueue() {
 	console.log(`[Queue] 取出訊息進行分析 (ID: ${currentItem.id}, User: ${currentItem.userId}, Socket: ${currentItem.socketId}, 剩餘待處理: ${pendingQueue.length})`);
 
 	let analysisResult = null;
-	let hasError = false;
 
 	try {
 		analysisResult = await analyzeWithGemini(currentItem.originalText);
-		if (analysisResult.isFallback) {
-			hasError = true;
-		}
 	} catch (err) {
-		console.error(`[Queue] 處理項目 ${currentItem.id} 時發生錯誤:`, err);
-		analysisResult = { keywords: ['無有效價值', '無有效價值', '無有效價值'], isFallback: true };
-		hasError = true;
+		console.error(`[Queue] 處理項目 ${currentItem.id} 時發生例外:`, err);
+		analysisResult = { keywords: extractFallbackKeywords(currentItem.originalText), isFallback: true };
 	}
 
-	if (!hasError && analysisResult && Array.isArray(analysisResult.keywords)) {
+	if (analysisResult && Array.isArray(analysisResult.keywords) && analysisResult.keywords.length > 0) {
 		// --- 成功：組裝標準 MessageLog 並存入記憶體 ---
 		const processedEntry = {
 			id: currentItem.id,
