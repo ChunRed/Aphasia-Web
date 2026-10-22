@@ -47,6 +47,38 @@ function TimelineIndicator() {
   );
 }
 
+import React, { Component, ReactNode, ErrorInfo } from "react";
+
+interface CanvasErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface CanvasErrorBoundaryState {
+  hasError: boolean;
+}
+
+class CanvasErrorBoundary extends Component<CanvasErrorBoundaryProps, CanvasErrorBoundaryState> {
+  constructor(props: CanvasErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): CanvasErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.warn("[CanvasErrorBoundary] WebGL canvas error caught, degrading to pure canvas fallback:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <div className="absolute inset-0 bg-white pointer-events-none" />;
+    }
+    return this.props.children;
+  }
+}
+
 function MobileDisplay() {
   const { currentPayload } = useSocket();
 
@@ -56,8 +88,10 @@ function MobileDisplay() {
         {/* Timeline HUD Debug Indicator: [Timer: 12.4s | PHASE_2_RUPTURE] */}
         <TimelineIndicator />
 
-        {/* 3D WebGL Canvas Layer (純粹化：僅保留 FloatingTextNetwork + 黑色直線網絡 + 12.0s 瞬間故障著色器，已移除 DynamicLine) */}
-        <MainCanvas keywords={currentPayload?.keywords} />
+        {/* 3D WebGL Canvas Layer (以 CanvasErrorBoundary 包覆防禦舊款手機 WebGL 崩潰) */}
+        <CanvasErrorBoundary>
+          <MainCanvas keywords={currentPayload?.keywords} />
+        </CanvasErrorBoundary>
 
         {/* 2D UI Overlay Layer (0-12s 沉澱打字與凝視 -> 12-15s 對照 -> 15-21s 倒退抹消 -> 21-25s 殘留懸空) */}
         <OverlayCenterText payload={currentPayload} />

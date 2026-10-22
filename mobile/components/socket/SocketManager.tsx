@@ -21,32 +21,81 @@ import io from "socket.io-client";
 export const getSocketServerUrl = (): string => {
   let url = "";
 
-  if (process.env.NEXT_PUBLIC_SOCKET_SERVER_URL) {
-    url = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL;
-  } else if (typeof window !== "undefined") {
-    const hostname = window.location.hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      url = "http://localhost:8080";
-    } else {
-      url = "https://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com";
+  // 0. 支援 URL 參數 ?server=... 或 ?socketUrl=...，方便手機端除錯或強制指定連線伺服器
+  if (typeof window !== "undefined") {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const queryServer = params.get("server") || params.get("socketUrl");
+      if (queryServer && queryServer.trim().length > 0) {
+        return queryServer.trim();
+      }
+    } catch {
+      // ignore
     }
-  } else {
-    url =
-      process.env.NODE_ENV === "development"
-        ? "http://localhost:8080"
-        : "https://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com";
   }
 
-  // 自動安全升級：當前端在 HTTPS 環境（如 Vercel）執行時，
-  // 瀏覽器嚴格禁止連線至非安全的 http / ws 端點（Mixed Content 封鎖）。
-  // 因此若非本地測試 (localhost)，自動將 http:// 升級為 https:// (對應 WebSocket 的 wss://)。
-  if (typeof window !== "undefined" && window.location.protocol === "https:") {
-    if (
-      url.startsWith("http://") &&
-      !url.includes("localhost") &&
-      !url.includes("127.0.0.1")
-    ) {
-      url = url.replace(/^http:\/\//i, "https://");
+  // 1. 環境變數優先
+  if (process.env.NEXT_PUBLIC_SOCKET_SERVER_URL) {
+    url = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL;
+  }
+
+  // 2. 智慧判定在不同裝置與網路環境下的連線位址
+  if (typeof window !== "undefined") {
+    const { hostname, protocol, port } = window.location;
+
+    // 若使用者直接開啟 8080 連接埠（如 Express 本體伺服器），以當前 origin 為準
+    if (port === "8080") {
+      return window.location.origin;
+    }
+
+    // 當手機透過 Wi-Fi 區網 (192.168.x.x / 10.x.x.x) 開啟網頁時，
+    // 若 url 寫著 localhost / 127.0.0.1，手機會嘗試連線自己而失敗 (DISCONNECTED)。
+    // 自動將 localhost 替換為當前網頁的主機 IP (hostname)！
+    if (url && (url.includes("localhost") || url.includes("127.0.0.1"))) {
+      if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+        url = url.replace(/localhost|127\.0\.0\.1/g, hostname);
+      }
+    }
+
+    // 若未設定 url 或 url 為空
+    if (!url) {
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        url = "http://localhost:8080";
+      } else if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.endsWith(".local")) {
+        // 手機連入電腦區網 IP 開啟
+        url = `http://${hostname}:8080`;
+      } else if (protocol === "https:") {
+        // HTTPS 線上環境：優先連線至具備有效 SSL 憑證的正式後端位址
+        url = "https://2026daf.nosidehere.space";
+      } else {
+        // HTTP 線上環境
+        url = "http://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com";
+      }
+    }
+
+    // 自動安全協定升級與防禦：
+    // 若前端在 HTTPS 環境，且 url 仍為 http:，且並非本地 IP
+    if (protocol === "https:" && url.startsWith("http://")) {
+      if (
+        !url.includes("localhost") &&
+        !url.includes("127.0.0.1") &&
+        !/^(?:http:\/\/)?(?:\d{1,3}\.){3}\d{1,3}/.test(url)
+      ) {
+        // AWS Elastic Beanstalk 預設網址不支援 HTTPS，若在 HTTPS 前端自動改向具備 SSL 的 nosidehere.space
+        if (url.includes("elasticbeanstalk.com")) {
+          url = "https://2026daf.nosidehere.space";
+        } else {
+          url = url.replace(/^http:\/\//i, "https://");
+        }
+      }
+    }
+  } else {
+    // SSR 備用
+    if (!url) {
+      url =
+        process.env.NODE_ENV === "development"
+          ? "http://localhost:8080"
+          : "https://2026daf.nosidehere.space";
     }
   }
 
@@ -129,7 +178,8 @@ export const getSharedSocket = (): SocketIOClient.Socket => {
         role: "mobile",
       },
       secure: isSecure,
-      transports: ["websocket", "polling"],
+      // 使用 polling 優先以確保舊款手機與行動網路能極速完成握手，再自動升級為 websocket
+      transports: ["polling", "websocket"],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,

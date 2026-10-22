@@ -26,12 +26,15 @@ interface MatchRange {
 
 const PUNCTUATION_SET = new Set([
   '，', '、', '。', '！', '？', '…', '—', '～', '：', '；',
-  ',', '.', '!', '?', ';', ':', ' ', '\n', '\t'
+  ',', '.', '!', '?', ';', ':', ' ', '\n', '\t',
+  '“', '”', '‘', '’', '（', '）', '【', '】', '《', '》',
+  '"', "'", '(', ')', '[', ']', '<', '>', '/', '\\', '|',
+  '-', '_', '=', '+', '*', '&', '%', '$', '#', '@', '~', '`'
 ]);
 
 function isPunctuationOrSeparator(char: string): boolean {
   if (!char) return false;
-  return PUNCTUATION_SET.has(char) || /[\s\p{P}]/u.test(char);
+  return PUNCTUATION_SET.has(char) || /\s/.test(char);
 }
 
 function getHumanizedTypingDelay(charJustTyped: string, baseSpeed: number = 115): number {
@@ -131,7 +134,7 @@ export default function OverlayCenterText({
   const activeKeywords =
     activePayload?.keywords && activePayload.keywords.length > 0
       ? activePayload.keywords
-      : ["無感", "剩餘價值", "每天", "灰色"];
+      : [];
 
   const [beforeCursor, setBeforeCursor] = useState<string>("");
   const [afterCursor, setAfterCursor] = useState<string>("");
@@ -169,7 +172,10 @@ export default function OverlayCenterText({
       let charIdx = 0;
 
       // 依字數微調打字基準速度，目標在第 9.5 秒（9~10 秒區間）完成打字
-      const pCount = (targetText.match(/[\s\p{P}]/gu) || []).length;
+      let pCount = 0;
+      for (let i = 0; i < targetText.length; i++) {
+        if (isPunctuationOrSeparator(targetText[i])) pCount++;
+      }
       const totalPunctDelay = pCount * 550;
       const availableCharTime = Math.max(3500, 9500 - totalPunctDelay);
       const baseSpeed = Math.max(

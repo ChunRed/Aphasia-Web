@@ -21,20 +21,72 @@ export interface MessageLog {
  * 3. 線上正式環境 -> http://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com
  */
 export const getSocketServerUrl = (): string => {
-  if (process.env.NEXT_PUBLIC_SOCKET_SERVER_URL) {
-    return process.env.NEXT_PUBLIC_SOCKET_SERVER_URL;
-  }
+  let url = "";
 
   if (typeof window !== "undefined") {
-    const hostname = window.location.hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://localhost:8080";
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const queryServer = params.get("server") || params.get("socketUrl");
+      if (queryServer && queryServer.trim().length > 0) {
+        return queryServer.trim();
+      }
+    } catch {
+      // ignore
     }
   }
 
-  return process.env.NODE_ENV === "development"
-    ? "http://localhost:8080"
-    : "http://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com";
+  if (process.env.NEXT_PUBLIC_SOCKET_SERVER_URL) {
+    url = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL;
+  }
+
+  if (typeof window !== "undefined") {
+    const { hostname, protocol, port } = window.location;
+
+    if (port === "8080") {
+      return window.location.origin;
+    }
+
+    if (url && (url.includes("localhost") || url.includes("127.0.0.1"))) {
+      if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+        url = url.replace(/localhost|127\.0\.0\.1/g, hostname);
+      }
+    }
+
+    if (!url) {
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        url = "http://localhost:8080";
+      } else if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.endsWith(".local")) {
+        url = `http://${hostname}:8080`;
+      } else if (protocol === "https:") {
+        url = "https://2026daf.nosidehere.space";
+      } else {
+        url = "http://daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.com";
+      }
+    }
+
+    if (protocol === "https:" && url.startsWith("http://")) {
+      if (
+        !url.includes("localhost") &&
+        !url.includes("127.0.0.1") &&
+        !/^(?:http:\/\/)?(?:\d{1,3}\.){3}\d{1,3}/.test(url)
+      ) {
+        if (url.includes("elasticbeanstalk.com")) {
+          url = "https://2026daf.nosidehere.space";
+        } else {
+          url = url.replace(/^http:\/\//i, "https://");
+        }
+      }
+    }
+  } else {
+    if (!url) {
+      url =
+        process.env.NODE_ENV === "development"
+          ? "http://localhost:8080"
+          : "https://2026daf.nosidehere.space";
+    }
+  }
+
+  return url;
 };
 
 /**
@@ -84,7 +136,7 @@ export const getSharedSocket = (): SocketIOClient.Socket => {
         uuid: userUUID, // 相容舊參數
         role: "client",
       },
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,

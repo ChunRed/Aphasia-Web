@@ -253,68 +253,84 @@ export function PerformanceTimelineProvider({
     }
   }, [socketPayload, triggerPreempt]);
 
+  // 取得高精度時間戳記（舊款手機若不支援 performance.now 則平滑降級為 Date.now）
+  const getNow = () =>
+    typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+
   // 核心統一時鐘 RAF 循環 (25 秒演出狀態機)
   useEffect(() => {
     let animationFrameId: number;
     let lastReactSyncTime = 0;
 
     const tick = () => {
-      const now = performance.now();
-      let rawElapsed = (now - startTimeRef.current) / 1000;
+      try {
+        const now = getNow();
+        let rawElapsed = (now - startTimeRef.current) / 1000;
 
-      // 檢查是否已達到 25.0s 週期上限
-      if (rawElapsed >= TIMELINE_CONFIG.TOTAL_DURATION) {
-        // 完成回報 (25.0s)：通知 Server 自己已進入閒置
-        if (!hasReportedIdleThisCycleRef.current) {
-          hasReportedIdleThisCycleRef.current = true;
-          if (autoReportIdle) {
-            console.log(
-              `[PerformanceTimeline] 25 秒演出週期結束，回報 DEVICE_IDLE`
-            );
-            reportIdle();
+        // 檢查是否已達到 25.0s 週期上限
+        if (rawElapsed >= TIMELINE_CONFIG.TOTAL_DURATION) {
+          // 完成回報 (25.0s)：通知 Server 自己已進入閒置
+          if (!hasReportedIdleThisCycleRef.current) {
+            hasReportedIdleThisCycleRef.current = true;
+            if (autoReportIdle) {
+              console.log(
+                `[PerformanceTimeline] 25 秒演出週期結束，回報 DEVICE_IDLE`
+              );
+              reportIdle();
+            }
           }
+
+          // 無新訊息時的循環：淡出後自動重啟 25 秒 4 階段循環
+          startTimeRef.current = now;
+          hasReportedIdleThisCycleRef.current = false;
+          cycleIndexRef.current++;
+          setCycleIndex(cycleIndexRef.current);
+          rawElapsed = 0.0;
         }
 
-        // 無新訊息時的循環：淡出後自動重啟 25 秒 4 階段循環
-        startTimeRef.current = now;
-        hasReportedIdleThisCycleRef.current = false;
-        cycleIndexRef.current++;
-        setCycleIndex(cycleIndexRef.current);
-        rawElapsed = 0.0;
-      }
+        const frame = computeTimelineFrame(
+          rawElapsed,
+          activePayloadRef.current,
+          cycleIndexRef.current,
+          false
+        );
+        currentFrameRef.current = frame;
 
-      const frame = computeTimelineFrame(
-        rawElapsed,
-        activePayloadRef.current,
-        cycleIndexRef.current,
-        false
-      );
-      currentFrameRef.current = frame;
+        // 1. 即時派發至 60fps 訂閱者（獨立 try-catch，防止 WebGL 訂閱者報錯拖垮時鐘循環）
+        frameSubscribersRef.current.forEach((cb) => {
+          try {
+            cb(frame);
+          } catch (cbErr) {
+            console.warn("[PerformanceTimeline] Frame subscriber error:", cbErr);
+          }
+        });
 
-      // 1. 即時派發至 60fps 訂閱者（WebGL Canvas / FloatingTextNetwork / PostProcessing）
-      frameSubscribersRef.current.forEach((cb) => cb(frame));
+        // 2. 同步 React 狀態（階段切換時立即同步；其餘每 80ms 同步一次以維持介面流暢反應）
+        const phaseChanged = frame.phase !== lastPhaseRef.current;
+        const timeToSync = now - lastReactSyncTime > 80;
 
-      // 2. 同步 React 狀態（階段切換時立即同步；其餘每 80ms 同步一次以維持介面流暢反應）
-      const phaseChanged = frame.phase !== lastPhaseRef.current;
-      const timeToSync = now - lastReactSyncTime > 80;
-
-      if (phaseChanged || timeToSync) {
-        lastReactSyncTime = now;
-        if (phaseChanged) {
-          lastPhaseRef.current = frame.phase;
-          console.log(`[Timer: ${frame.elapsedTime.toFixed(1)}s | ${frame.phase}]`);
+        if (phaseChanged || timeToSync) {
+          lastReactSyncTime = now;
+          if (phaseChanged) {
+            lastPhaseRef.current = frame.phase;
+            console.log(`[Timer: ${frame.elapsedTime.toFixed(1)}s | ${frame.phase}]`);
+          }
+          setPhase(frame.phase);
+          setElapsedTime(frame.elapsedTime);
+          setPhaseTime(frame.phaseTime);
+          setPhaseProgress(frame.phaseProgress);
+          setTotalProgress(frame.totalProgress);
         }
-        setPhase(frame.phase);
-        setElapsedTime(frame.elapsedTime);
-        setPhaseTime(frame.phaseTime);
-        setPhaseProgress(frame.phaseProgress);
-        setTotalProgress(frame.totalProgress);
+      } catch (tickErr) {
+        console.warn("[PerformanceTimeline] Tick calculation error:", tickErr);
       }
 
       animationFrameId = requestAnimationFrame(tick);
     };
 
-    startTimeRef.current = performance.now();
+    startTimeRef.current = getNow();
     animationFrameId = requestAnimationFrame(tick);
 
     return () => {

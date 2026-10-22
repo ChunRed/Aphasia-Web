@@ -69,31 +69,231 @@ const generateMessageId = () => {
 /**
  * 敏感詞與髒話過濾正則（確保本地保底抽取時絕不選中不雅詞彙）
  */
+/**
+ * 敏感詞與髒話過濾正則（確保本地保底抽取時若有其他詞彙可選，優先避開不雅詞彙）
+ */
 const PROFANITY_REGEX = /幹|操|靠北|靠杯|他媽|三小|白痴|白癡|智障|機掰|雞掰|賤人|混蛋|王八|死八婆|fuck|shit|bitch|asshole|cunt/i;
 
 /**
- * 輔助函式：從原文中切取 3 個詞作為備用關鍵字保底（過濾髒話，永不拋錯）
+ * 輔助函式：純演算法本地保底切片（純原文切片，字數 2~4，前中後分佈採樣，絕無外部寫死字詞）
+ * @param {string} text 觀眾輸入原文
+ * @returns {string[]} 3 個完全來自原文的真實子字串關鍵字
  */
 function extractFallbackKeywords(text) {
 	if (!text || typeof text !== 'string') {
-		return ['紀錄', '片刻', '日常'];
+		return [];
 	}
-	const segments = text
-		.split(/[\s，。！？、…—～：；,.!?;:\n\t]+/u)
-		.map((s) => s.trim())
-		.filter((s) => s.length >= 2 && !PROFANITY_REGEX.test(s));
 
-	const unique = Array.from(new Set(segments));
-	if (unique.length >= 3) {
-		return unique.slice(0, 3);
+	// 1. 純粹取自原文：去除標點符號與空白，切分出純文字區塊（chunk）
+	// 每個 chunk 必定是原文中連續且不含標點空白的真實子字串
+	const rawChunks = text
+		.split(/[\s\p{P}\p{S}]+/gu)
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
+
+	if (rawChunks.length === 0) {
+		// 若原文全為符號，截取前 1~3 個原文字元循環，絕不補入外部詞彙
+		const trimmedText = text.trim();
+		if (!trimmedText) return [];
+		const fallbackChar = trimmedText.slice(0, 1);
+		return [fallbackChar, fallbackChar, fallbackChar];
 	}
-	const defaults = ['紀錄', '片刻', '日常'];
-	for (const d of defaults) {
-		if (!unique.includes(d) && unique.length < 3) {
-			unique.push(d);
+
+	// 計算純文字總長度與各 chunk 的 cleanIndex 起訖點
+	let totalCleanLen = 0;
+	const chunkInfos = [];
+	for (const chunk of rawChunks) {
+		chunkInfos.push({
+			chunk,
+			cleanStart: totalCleanLen,
+			cleanEnd: totalCleanLen + chunk.length,
+		});
+		totalCleanLen += chunk.length;
+	}
+
+	const isValidSlice = (slice) => {
+		return (
+			typeof slice === 'string' &&
+			slice.length >= 1 &&
+			slice.length <= 4 &&
+			text.includes(slice)
+		);
+	};
+
+	// --- 超短文本處理：若原文總長度極短（例如 4 個字以內），拆解為單字或雙字作為關鍵字，絕不補入外部詞彙 ---
+	if (totalCleanLen <= 4) {
+		const candidates = [];
+		// 優先取 2 字詞
+		for (const { chunk } of chunkInfos) {
+			for (let i = 0; i <= chunk.length - 2; i++) {
+				const sub = chunk.slice(i, i + 2);
+				if (!candidates.includes(sub) && isValidSlice(sub)) {
+					candidates.push(sub);
+				}
+			}
+		}
+		// 不足時取 1 字詞
+		for (const { chunk } of chunkInfos) {
+			for (let i = 0; i < chunk.length; i++) {
+				const sub = chunk.slice(i, i + 1);
+				if (!candidates.includes(sub) && isValidSlice(sub)) {
+					candidates.push(sub);
+				}
+			}
+		}
+
+		// 若依然不足 3 個（如原文僅 1~2 字元），從已有候選詞中循環補齊至 3 個，絕不補入外部詞彙
+		const result = [];
+		let idx = 0;
+		while (result.length < 3 && candidates.length > 0) {
+			result.push(candidates[idx % candidates.length]);
+			idx++;
+		}
+		return result.slice(0, 3);
+	}
+
+	// --- 正常 / 長文本處理：分佈採樣（前段、中段、後段各截取一個 2～3 字的片段，組合成 3 個不重複的詞彙）---
+	// 收集所有在 chunk 內部長度為 2~3 字的切片，並記錄其在 cleanText 中的起始位置
+	const allSlices = [];
+	for (const { chunk, cleanStart } of chunkInfos) {
+		for (let len = 2; len <= 3; len++) {
+			for (let i = 0; i <= chunk.length - len; i++) {
+				const slice = chunk.slice(i, i + len);
+				allSlices.push({
+					word: slice,
+					cleanIndex: cleanStart + i,
+					len,
+					isProfane: PROFANITY_REGEX.test(slice),
+				});
+			}
 		}
 	}
-	return unique.slice(0, 3);
+
+	if (allSlices.length === 0) {
+		// 若 chunk 長度均為 1（例如全是單字分隔），取單字
+		const singleChars = rawChunks.map((c) => c.slice(0, 1)).filter(isValidSlice);
+		const result = [];
+		let sIdx = 0;
+		while (result.length < 3 && singleChars.length > 0) {
+			result.push(singleChars[sIdx % singleChars.length]);
+			sIdx++;
+		}
+		return result.slice(0, 3);
+	}
+
+	// 按在純文字中的位置排序
+	allSlices.sort((a, b) => a.cleanIndex - b.cleanIndex);
+
+	// 若存在非髒話候選詞，優先使用非髒話切片
+	const nonProfanePool = allSlices.filter((s) => !s.isProfane);
+	const poolToUse = nonProfanePool.length >= 3 ? nonProfanePool : allSlices;
+
+	const sec1 = totalCleanLen / 3;
+	const sec2 = (totalCleanLen * 2) / 3;
+
+	const frontCandidates = poolToUse.filter((s) => s.cleanIndex < sec1);
+	const midCandidates = poolToUse.filter((s) => s.cleanIndex >= sec1 && s.cleanIndex < sec2);
+	const backCandidates = poolToUse.filter((s) => s.cleanIndex >= sec2);
+
+	const selected = [];
+
+	const pickFromSection = (pool, preferLen = 2) => {
+		const uniquePool = pool.filter((item) => !selected.includes(item.word));
+		if (uniquePool.length === 0) return null;
+
+		const matchedLen = uniquePool.filter((item) => item.len === preferLen);
+		if (matchedLen.length > 0) {
+			return matchedLen[0].word;
+		}
+		return uniquePool[0].word;
+	};
+
+	// 前段、中段、後段各截取一個 2～3 字的片段
+	const frontWord = pickFromSection(frontCandidates, 2);
+	if (frontWord) selected.push(frontWord);
+
+	const midWord = pickFromSection(midCandidates, 2);
+	if (midWord) selected.push(midWord);
+
+	const backWord = pickFromSection(backCandidates, 2);
+	if (backWord) selected.push(backWord);
+
+	// 若某段無切片或產生重複，從其餘候選詞補足 3 個不重複詞彙
+	if (selected.length < 3) {
+		for (const item of poolToUse) {
+			if (!selected.includes(item.word)) {
+				selected.push(item.word);
+				if (selected.length === 3) break;
+			}
+		}
+	}
+
+	// 若依然不足 3 個不重複詞（例如重複字詞多），循環補齊至 3 個
+	let fillIdx = 0;
+	while (selected.length < 3 && poolToUse.length > 0) {
+		selected.push(poolToUse[fillIdx % poolToUse.length].word);
+		fillIdx++;
+	}
+
+	return selected.slice(0, 3);
+}
+
+/**
+ * 派發前的格式清洗（Sanitization）
+ * 1. 檢查陣列中每個詞彙是否真正被 originalText 包含，若無則剔除。
+ * 2. 檢查每個詞彙長度，若大於 4 個字一律截斷至前 4 個字。
+ * 3. 確保最終輸出的關鍵字數量為 3 個，且全部皆為原文真實子字串。
+ * @param {string[]} rawKeywords 輸入關鍵字陣列
+ * @param {string} originalText 觀眾輸入原文
+ * @returns {string[]} 清洗後嚴格為 3 個原文子字串的關鍵字陣列
+ */
+function sanitizeKeywords(rawKeywords, originalText) {
+	if (!originalText || typeof originalText !== 'string') {
+		return [];
+	}
+
+	const sanitized = [];
+	const list = Array.isArray(rawKeywords) ? rawKeywords : [];
+
+	for (const item of list) {
+		if (typeof item !== 'string') continue;
+		let kw = item.trim();
+		if (!kw) continue;
+
+		// 移除標點與空白
+		kw = kw.replace(/[\s\p{P}\p{S}]+/gu, '');
+		if (!kw) continue;
+
+		// 若大於 4 個字一律截斷至前 4 個字
+		if (kw.length > 4) {
+			kw = kw.slice(0, 4);
+		}
+
+		// 檢查是否真正被 originalText 包含且尚未選取
+		if (originalText.includes(kw) && !sanitized.includes(kw)) {
+			sanitized.push(kw);
+		}
+	}
+
+	// 若不足 3 個，調用本地保底切片補足至 3 個
+	if (sanitized.length < 3) {
+		const fallbacks = extractFallbackKeywords(originalText);
+		for (const fb of fallbacks) {
+			if (!sanitized.includes(fb) && originalText.includes(fb)) {
+				sanitized.push(fb);
+				if (sanitized.length === 3) break;
+			}
+		}
+
+		// 極短文本或重複情況下循環補齊
+		let fIdx = 0;
+		while (sanitized.length < 3 && fallbacks.length > 0) {
+			sanitized.push(fallbacks[fIdx % fallbacks.length]);
+			fIdx++;
+		}
+	}
+
+	return sanitized.slice(0, 3);
 }
 
 // 輔助函式：呼叫 Gemini API 分析文字（安全極簡呼叫，支援短暫尖峰重試）
@@ -112,8 +312,9 @@ async function callGeminiSingle(text, config) {
 
 async function analyzeWithGemini(text) {
 	if (!ai) {
-		console.warn('[Gemini] 未初始化 SDK，啟用保底關鍵字');
-		return { keywords: extractFallbackKeywords(text), isFallback: true };
+		console.warn('[Gemini] 未初始化 SDK，啟用本地保底切片');
+		const fallbackKw = extractFallbackKeywords(text);
+		return { keywords: sanitizeKeywords(fallbackKw, text), isFallback: true };
 	}
 
 	try {
@@ -123,7 +324,7 @@ async function analyzeWithGemini(text) {
 				response = await callGeminiSingle(text, geminiConfig);
 				break;
 			} catch (err) {
-				console.warn(`[Gemini] 第 ${attempt} 次呼叫失敗: ${err.message}`);
+				console.error(`[Gemini] 第 ${attempt} 次呼叫失敗. Error Detail:`, err);
 				if (attempt < 2) {
 					await new Promise((r) => setTimeout(r, 1200));
 				}
@@ -131,7 +332,23 @@ async function analyzeWithGemini(text) {
 		}
 
 		let keywords = [];
-		const rawText = response && response.text ? response.text.trim() : '';
+		const rawText =
+			response && typeof response.text === 'function'
+				? response.text()
+				: response && typeof response.text === 'string'
+					? response.text.trim()
+					: response && response.text
+						? String(response.text).trim()
+						: '';
+
+		console.log(`[Gemini] API 回傳 Raw Text:\n${rawText || '(空值或未回傳)'}`);
+		if (response && !rawText) {
+			try {
+				console.log(`[Gemini] Response 詳細結構:`, JSON.stringify(response, null, 2));
+			} catch (e) {
+				console.log(`[Gemini] Response 物件:`, response);
+			}
+		}
 
 		if (rawText) {
 			try {
@@ -143,22 +360,25 @@ async function analyzeWithGemini(text) {
 						.filter(Boolean)
 					: [];
 			} catch (parseErr) {
-				console.warn('[Gemini] JSON parse fallback triggered:', parseErr.message);
+				console.error('[Gemini] JSON parse 失敗. Raw Text:', rawText, 'Error Detail:', parseErr);
 			}
 		}
 
-		// 保底：若解析出的關鍵字為空，自動從原文切 3 個字詞補上，永不拋出錯誤
+		// 若解析出的關鍵字為空，自動從原文切 3 個字詞補上，永不拋出錯誤
 		if (!keywords || keywords.length === 0) {
-			keywords = extractFallbackKeywords(text);
-			console.log(`[Gemini] 啟用保底關鍵字: [${keywords.join(', ')}]`);
-			return { keywords, isFallback: true };
+			const fallbackKw = extractFallbackKeywords(text);
+			const sanitizedKw = sanitizeKeywords(fallbackKw, text);
+			console.log(`[Gemini] 未能取得有效關鍵字，啟用本地保底關鍵字: [${sanitizedKw.join(', ')}]`);
+			return { keywords: sanitizedKw, isFallback: true };
 		}
 
-		return { keywords, isFallback: false };
+		const cleanKw = sanitizeKeywords(keywords, text);
+		console.log(`[Gemini] 解析成功並完成清洗: [${cleanKw.join(', ')}]`);
+		return { keywords: cleanKw, isFallback: false };
 	} catch (err) {
-		console.error(`[Gemini] 分析過程發生例外 (${err.message})，啟用保底關鍵字`);
+		console.error('[Gemini] 分析過程發生例外. Error Detail:', err);
 		const fallbackKw = extractFallbackKeywords(text);
-		return { keywords: fallbackKw, isFallback: true };
+		return { keywords: sanitizeKeywords(fallbackKw, text), isFallback: true };
 	}
 }
 
@@ -248,11 +468,12 @@ function tryDispatchNext() {
 		}
 
 		const item = readyMessageQueue.shift();
+		const finalKeywords = sanitizeKeywords(item.keywords, item.originalText);
 		const payload = {
 			id: item.id,
 			userId: item.userId,
 			originalText: item.originalText,
-			keywords: item.keywords,
+			keywords: finalKeywords,
 		};
 
 		// 標記該裝置為 busy 並更新派發時間戳記
@@ -264,7 +485,7 @@ function tryDispatchNext() {
 
 		const busyCount = Array.from(devicesMap.values()).filter((d) => d.status === 'busy').length;
 		const totalCount = devicesMap.size;
-		console.log(`[Dispatcher] Assigned message to Device [${targetDevice.deviceUuid}] (Busy: ${busyCount}/${totalCount}, Pending Messages: ${readyMessageQueue.length}) [Msg: ${payload.id}]`);
+		console.log(`[Dispatcher] Assigned message to Device [${targetDevice.deviceUuid}] with Keywords [${payload.keywords.join(', ')}] (Busy: ${busyCount}/${totalCount}, Pending Messages: ${readyMessageQueue.length}) [Msg: ${payload.id}]`);
 	}
 }
 
@@ -319,17 +540,19 @@ async function processQueue() {
 	try {
 		analysisResult = await analyzeWithGemini(currentItem.originalText);
 	} catch (err) {
-		console.error(`[Queue] 處理項目 ${currentItem.id} 時發生例外:`, err);
+		console.error(`[Queue] 處理項目 ${currentItem.id} 時發生例外. Error Detail:`, err);
 		analysisResult = { keywords: extractFallbackKeywords(currentItem.originalText), isFallback: true };
 	}
 
-	if (analysisResult && Array.isArray(analysisResult.keywords) && analysisResult.keywords.length > 0) {
+	const cleanKeywords = sanitizeKeywords(analysisResult?.keywords, currentItem.originalText);
+
+	if (cleanKeywords && cleanKeywords.length > 0) {
 		// --- 成功：組裝標準 MessageLog 並存入記憶體 ---
 		const processedEntry = {
 			id: currentItem.id,
 			userId: currentItem.userId,
 			originalText: currentItem.originalText,
-			keywords: analysisResult.keywords,
+			keywords: cleanKeywords,
 			timestamp: Date.now(),
 			// 向下相容欄位
 			uuid: currentItem.userId,

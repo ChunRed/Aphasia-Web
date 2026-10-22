@@ -115,7 +115,7 @@ export function createFloatingTextNetwork(
     damping = RHYTHM_CONFIG.DAMPING,
     springTension = RHYTHM_CONFIG.SPRING_TENSION,
     connectDistance = 2.1,
-    labels = ["無感", "剩餘價值", "每天", "灰色", "DAF"],
+    labels = [],
     lineColor = 0x000000,
     textColor = "#000000",
   } = options;
@@ -160,9 +160,9 @@ export function createFloatingTextNetwork(
     nodes.length = 0;
 
     const filtered = targetLabels.filter((l) => typeof l === "string" && l.trim().length > 0);
-    const effectiveLabels =
-      filtered.length > 0 ? filtered : ["無感", "剩餘價值", "每天", "灰色", "DAF"];
+    const effectiveLabels = filtered;
     const count = effectiveLabels.length;
+    if (count === 0) return;
 
     for (let i = 0; i < count; i++) {
       const textIndex = i;
@@ -292,14 +292,21 @@ export function createFloatingTextNetwork(
     if (phase === TimelinePhase.PHASE_2_RUPTURE) {
       if (!hasExplodedInPhase2) {
         hasExplodedInPhase2 = true;
+        const effective = activeKeywords && activeKeywords.length > 0 ? activeKeywords : labels;
         console.log(
           `[FloatingTextNetwork] Phase 2 (12.0s 瞬間爆發)：彈射進場！關鍵字: [${(
-            activeKeywords || labels
+            effective || []
           ).join(", ")}]`
         );
-        rebuildNodes(activeKeywords && activeKeywords.length > 0 ? activeKeywords : labels, true);
-        group.visible = true;
-        lineMaterial.opacity = 0.85;
+        if (effective && effective.length > 0) {
+          rebuildNodes(effective, true);
+          group.visible = true;
+          lineMaterial.opacity = 0.85;
+        } else {
+          rebuildNodes([], false);
+          group.visible = false;
+          lineMaterial.opacity = 0.0;
+        }
       }
     }
 

@@ -4,7 +4,7 @@ import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { createFloatingTextNetwork, FloatingTextNetworkOptions } from "./FloatingTextNetwork";
-import { createPostProcessing } from "./postprocessing";
+import { createPostProcessing, PostProcessingInstance } from "./postprocessing";
 import {
   usePerformanceTimeline,
   TimelinePhase,
@@ -37,8 +37,7 @@ export const TEXT_NETWORK_CONFIG: FloatingTextNetworkOptions = {
   fontSize: 45,
   spreadRadius: 2.9,
   connectDistance: 2.2,
-  nodeCount: 5,
-  labels: ["無感", "剩餘價值", "每天", "灰色", "DAF"],
+  labels: [] as string[],
   showBitsInfo: true,
   subTextRatio: 0.42,
   lineColor: 0x000000,
@@ -103,16 +102,24 @@ export default function MainCanvas({
     camera.position.set(tx, ty + CAMERA_CONFIG.elevation, tz + CAMERA_CONFIG.distance);
     camera.lookAt(tx, ty, tz);
 
-    // 3. Renderer 設定
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: false,
-      powerPreference: "high-performance",
-    });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(width, height);
-    renderer.setClearColor(0xffffff, 1);
-    container.appendChild(renderer.domElement);
+    // 3. Renderer 設定（針對舊款手機平滑降級，避免 high-performance 導致上下文崩潰）
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: false,
+        alpha: false,
+        powerPreference: "default",
+        precision: "mediump",
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      renderer.setSize(width, height);
+      renderer.setClearColor(0xffffff, 1);
+      container.appendChild(renderer.domElement);
+    } catch (err) {
+      console.warn("[MainCanvas] WebGL context initialization failed on this device:", err);
+      // 舊款手機不支援 WebGL 2 時優雅降級為純白畫布，不阻礙 2D 文字與狀態機正常運作
+      return;
+    }
 
     // 4. OrbitControls 軌道控制
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -125,34 +132,45 @@ export default function MainCanvas({
     controls.maxDistance = 18.0;
 
     // 5. 核心 3D 視覺圖層：關鍵字節點與直線連線網絡 (FloatingTextNetwork)
-    // （已徹底移除 DynamicLine 動態厚線，保留純粹黑白空間）
     const mergedTextConfig = { ...TEXT_NETWORK_CONFIG, ...textNetworkConfig };
     const floatingNetwork = createFloatingTextNetwork(mergedTextConfig);
     scene.add(floatingNetwork.group);
 
     // 6. 後處理系統 (EffectComposer + Monochrome Glitch + BlockInvertPass)
-    const postProcessing = createPostProcessing(
-      renderer,
-      scene,
-      camera,
-      width,
-      height,
-      { monochrome: GLITCH_CONFIG.monochrome }
-    );
+    let postProcessing: PostProcessingInstance | null = null;
+    try {
+      postProcessing = createPostProcessing(
+        renderer,
+        scene,
+        camera,
+        width,
+        height,
+        { monochrome: GLITCH_CONFIG.monochrome }
+      );
+    } catch (err) {
+      console.warn("[MainCanvas] PostProcessing init failed, falling back to direct render:", err);
+      postProcessing = null;
+    }
 
     // 7. 響應式 Resize
     const handleResize = () => {
-      if (!container) return;
-      const w = container.clientWidth || window.innerWidth;
-      const h = container.clientHeight || window.innerHeight;
+      try {
+        if (!container) return;
+        const w = container.clientWidth || window.innerWidth;
+        const h = container.clientHeight || window.innerHeight;
 
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
 
-      renderer.setSize(w, h);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(w, h);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 
-      postProcessing.handleResize(w, h, Math.min(window.devicePixelRatio, 2));
+        if (postProcessing) {
+          postProcessing.handleResize(w, h, Math.min(window.devicePixelRatio || 1, 1.5));
+        }
+      } catch (e) {
+        console.warn("[MainCanvas] Resize error:", e);
+      }
     };
 
     window.addEventListener("resize", handleResize);
@@ -165,71 +183,78 @@ export default function MainCanvas({
     let lastHandledCycle = -1;
 
     const animate = () => {
-      const deltaTime = clock.getDelta();
-      const currentFrame = latestFrameDataRef.current;
+      try {
+        const deltaTime = clock.getDelta();
+        const currentFrame = latestFrameDataRef.current;
 
-      const phase = currentFrame?.phase || TimelinePhase.PHASE_1_ACCUMULATE;
-      const elapsedTime = currentFrame?.elapsedTime || 0.0;
-      const phaseTime = currentFrame?.phaseTime || 0.0;
-      const cycleIndex = currentFrame?.cycleIndex || 0;
+        const phase = currentFrame?.phase || TimelinePhase.PHASE_1_ACCUMULATE;
+        const elapsedTime = currentFrame?.elapsedTime || 0.0;
+        const phaseTime = currentFrame?.phaseTime || 0.0;
+        const cycleIndex = currentFrame?.cycleIndex || 0;
 
-      // 新循環或搶佔重置標記
-      if (cycleIndex !== lastHandledCycle) {
-        lastHandledCycle = cycleIndex;
-        hasTriggeredBurstAt12 = false;
-      }
-
-      // (A) 相機自轉更新
-      if (phase === TimelinePhase.PHASE_2_RUPTURE) {
-        controls.autoRotateSpeed = rotateSpeed * 1.5;
-      } else {
-        controls.autoRotateSpeed = rotateSpeed;
-      }
-      controls.update();
-
-      // (B) 後處理著色器狀態控制
-      // Phase 1 (0.0s – 12.0s)：純白畫布，全部關閉（Pass disabled）
-      // Phase 2 (12.0s 瞬間爆發)：啟用 Monochrome Glitch Pass 撕裂約 0.3 秒，伴隨 Block Invert Pass 瞬間閃爍
-      // Phase 3 & Phase 4：關閉反轉，保持乾淨平靜
-      if (phase === TimelinePhase.PHASE_1_ACCUMULATE) {
-        hasTriggeredBurstAt12 = false;
-        postProcessing.blockInvertPass.uniforms["uActive"].value = 0.0;
-        const glitchUniforms = postProcessing.glitchPass.uniforms as Record<string, { value: unknown }>;
-        if (glitchUniforms["byp"]) {
-          glitchUniforms["byp"].value = 1;
+        // 新循環或搶佔重置標記
+        if (cycleIndex !== lastHandledCycle) {
+          lastHandledCycle = cycleIndex;
+          hasTriggeredBurstAt12 = false;
         }
-      } else if (phase === TimelinePhase.PHASE_2_RUPTURE) {
-        if (elapsedTime >= 12.0 && !hasTriggeredBurstAt12) {
-          hasTriggeredBurstAt12 = true;
-          console.log(`[MainCanvas] Phase 2 (12.0s 瞬間爆發)：觸發 Monochrome Glitch + Block Invert Pass`);
-          postProcessing.triggerBeatGlitch(GLITCH_CONFIG.phraseDropDuration);
-          postProcessing.triggerBlockInvert(
-            GLITCH_CONFIG.blockInvertDuration,
-            GLITCH_CONFIG.invertBlockCount
-          );
+
+        // (A) 相機自轉更新
+        if (phase === TimelinePhase.PHASE_2_RUPTURE) {
+          controls.autoRotateSpeed = rotateSpeed * 1.5;
+        } else {
+          controls.autoRotateSpeed = rotateSpeed;
         }
-      } else {
-        // Phase 3 & 4
-        postProcessing.blockInvertPass.uniforms["uActive"].value = 0.0;
+        controls.update();
+
+        // (B) 後處理著色器狀態控制（若 postProcessing 可用）
+        if (postProcessing) {
+          if (phase === TimelinePhase.PHASE_1_ACCUMULATE) {
+            hasTriggeredBurstAt12 = false;
+            postProcessing.blockInvertPass.uniforms["uActive"].value = 0.0;
+            const glitchUniforms = postProcessing.glitchPass.uniforms as Record<string, { value: unknown }>;
+            if (glitchUniforms["byp"]) {
+              glitchUniforms["byp"].value = 1;
+            }
+          } else if (phase === TimelinePhase.PHASE_2_RUPTURE) {
+            if (elapsedTime >= 12.0 && !hasTriggeredBurstAt12) {
+              hasTriggeredBurstAt12 = true;
+              console.log(`[MainCanvas] Phase 2 (12.0s 瞬間爆發)：觸發 Monochrome Glitch + Block Invert Pass`);
+              postProcessing.triggerBeatGlitch(GLITCH_CONFIG.phraseDropDuration);
+              postProcessing.triggerBlockInvert(
+                GLITCH_CONFIG.blockInvertDuration,
+                GLITCH_CONFIG.invertBlockCount
+              );
+            }
+          } else {
+            postProcessing.blockInvertPass.uniforms["uActive"].value = 0.0;
+          }
+
+          postProcessing.update(deltaTime);
+        }
+
+        // (C) 3D 關鍵字網絡動態更新
+        floatingNetwork.updateWithTimeline(
+          elapsedTime,
+          phase,
+          phaseTime,
+          elapsedTime,
+          activeKeywordsRef.current
+        );
+
+        // (D) 渲染輸出：優先使用後處理合成，若裝置不支援則平滑降級為直出
+        if (postProcessing) {
+          postProcessing.render();
+        } else {
+          renderer.render(scene, camera);
+        }
+      } catch (frameErr) {
+        console.warn("[MainCanvas] Animate frame error:", frameErr);
+        try {
+          renderer.render(scene, camera);
+        } catch {
+          // ignore
+        }
       }
-
-      postProcessing.update(deltaTime);
-
-      // (C) 3D 關鍵字網絡動態更新
-      // Phase 1：完全隱藏，保持純白畫布
-      // Phase 2 (12.0s)：彈簧阻尼自深處炸出至前景，拉出幾何直線網絡
-      // Phase 3 (15.0s – 21.0s)：隨 2D 文本倒退刪除，連線逐漸淡出稀疏
-      // Phase 4 (21.0s – 25.0s)：連線完全消失，關鍵字緩慢漂浮自轉
-      floatingNetwork.updateWithTimeline(
-        elapsedTime,
-        phase,
-        phaseTime,
-        elapsedTime,
-        activeKeywordsRef.current
-      );
-
-      // (D) 後處理合成渲染
-      postProcessing.render();
 
       animationFrameId = requestAnimationFrame(animate);
     };
@@ -241,16 +266,24 @@ export default function MainCanvas({
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", handleResize);
 
-      controls.dispose();
-      postProcessing.dispose();
-
-      floatingNetwork.dispose();
-      scene.remove(floatingNetwork.group);
-
-      renderer.dispose();
-      if (renderer.domElement.parentNode) {
-        renderer.domElement.parentNode.removeChild(renderer.domElement);
-      }
+      try {
+        controls.dispose();
+      } catch {}
+      try {
+        if (postProcessing) {
+          postProcessing.dispose();
+        }
+      } catch {}
+      try {
+        floatingNetwork.dispose();
+        scene.remove(floatingNetwork.group);
+      } catch {}
+      try {
+        renderer.dispose();
+        if (renderer.domElement.parentNode) {
+          renderer.domElement.parentNode.removeChild(renderer.domElement);
+        }
+      } catch {}
     };
   }, [autoRotate, rotateSpeed, textNetworkConfig]);
 
