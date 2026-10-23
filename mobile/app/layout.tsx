@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import VConsoleLoader from "@/components/debug/VConsoleLoader";
 
 export const metadata: Metadata = {
   title: "Aphasia Mobile - Web View",
@@ -35,6 +36,7 @@ export default function RootLayout({
         className="h-full w-full bg-white text-black overflow-hidden select-none"
         suppressHydrationWarning
       >
+        <VConsoleLoader />
         {children}
       </body>
     </html>
