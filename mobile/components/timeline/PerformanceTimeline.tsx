@@ -14,11 +14,11 @@ import { getSeedPresetForDevice } from "@/config/seedPresets";
 
 /**
  * 演出生命週期 4 階段狀態定義 (Timeline States)
- * 總長調整為 25.0 秒，強化階段感與沉澱凝視：
- * PHASE_1_ACCUMULATE（沉澱凝視，0.0s – 12.0s，長度 12 秒）
- * PHASE_2_RUPTURE   （演算法斷裂與關鍵字爆發，12.0s – 15.0s，長度 3 秒，12.0s 瞬間爆發）
- * PHASE_3_ERASE     （倒退抹消與失重，15.0s – 21.0s，長度 6 秒）
- * PHASE_4_RESIDUAL  （殘留與懸空，21.0s – 25.0s，長度 4 秒）
+ * 總長維持 25.0 秒，調整後的時序節點分配：
+ * PHASE_1_ACCUMULATE（沉澱打字，0.0s – 12.0s，長度 12 秒）：文字逐字浮現，下方數值維持顯示 {B} bits
+ * PHASE_2_RUPTURE   （關鍵字凝固凝視，12.0s – 18.0s，由 3s 延長為 6 秒）：12.0s 第一次閃爍浮現，定格凝視關鍵字與位元數整整 6 秒
+ * PHASE_3_ERASE     （倒退抹消，18.0s – 22.5s，由 6s 縮短為 4.5 秒）：18.0s 第二次閃爍突變為微觀質量 {m} g，加快倒退抹消非關鍵字
+ * PHASE_4_RESIDUAL  （殘留懸空，22.5s – 25.0s，由 4s 縮短為 2.5 秒）：僅存關鍵字懸浮於 3D 空間，定格最終質量，25.0s 回報 DEVICE_IDLE
  */
 export enum TimelinePhase {
   PHASE_1_ACCUMULATE = "PHASE_1_ACCUMULATE",
@@ -32,10 +32,10 @@ export const TIMELINE_CONFIG = {
   PHASE_1_END: 12.0,
   PHASE_2_START: 12.0,
   PHASE_2_BURST: 12.0,
-  PHASE_2_END: 15.0,
-  PHASE_3_START: 15.0,
-  PHASE_3_END: 21.0,
-  PHASE_4_START: 21.0,
+  PHASE_2_END: 18.0,
+  PHASE_3_START: 18.0,
+  PHASE_3_END: 22.5,
+  PHASE_4_START: 22.5,
   PHASE_4_END: 25.0,
   TOTAL_DURATION: 25.0,
 } as const;
@@ -116,15 +116,15 @@ export function computeTimelineFrame(
   } else if (elapsedTime < TIMELINE_CONFIG.PHASE_3_START) {
     phase = TimelinePhase.PHASE_2_RUPTURE;
     phaseTime = elapsedTime - TIMELINE_CONFIG.PHASE_2_START;
-    phaseDuration = TIMELINE_CONFIG.PHASE_2_END - TIMELINE_CONFIG.PHASE_2_START; // 3.0s
+    phaseDuration = TIMELINE_CONFIG.PHASE_2_END - TIMELINE_CONFIG.PHASE_2_START; // 6.0s (12.0s - 18.0s)
   } else if (elapsedTime < TIMELINE_CONFIG.PHASE_4_START) {
     phase = TimelinePhase.PHASE_3_ERASE;
     phaseTime = elapsedTime - TIMELINE_CONFIG.PHASE_3_START;
-    phaseDuration = TIMELINE_CONFIG.PHASE_3_END - TIMELINE_CONFIG.PHASE_3_START; // 6.0s
+    phaseDuration = TIMELINE_CONFIG.PHASE_3_END - TIMELINE_CONFIG.PHASE_3_START; // 4.5s (18.0s - 22.5s)
   } else {
     phase = TimelinePhase.PHASE_4_RESIDUAL;
     phaseTime = elapsedTime - TIMELINE_CONFIG.PHASE_4_START;
-    phaseDuration = TIMELINE_CONFIG.PHASE_4_END - TIMELINE_CONFIG.PHASE_4_START; // 4.0s
+    phaseDuration = TIMELINE_CONFIG.PHASE_4_END - TIMELINE_CONFIG.PHASE_4_START; // 2.5s (22.5s - 25.0s)
   }
 
   const phaseProgress =

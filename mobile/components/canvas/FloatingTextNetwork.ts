@@ -348,8 +348,8 @@ export function createFloatingTextNetwork(
     }
 
     // ========================================================================
-    // Phase 2 (12.0s – 15.0s)：演算法斷裂與關鍵字爆發
-    // 12.0s 瞬間爆發：關鍵字初次浮現階段，嚴格顯示為位元數 [XX bits]
+    // Phase 2 (12.0s – 18.0s，長度 6 秒)：關鍵字凝固凝視
+    // 12.0s 第一次反相閃爍爆發：關鍵字初次浮現階段，嚴格維持顯示為位元數 [XX bits]，嚴禁切換為公克
     // ========================================================================
     if (phase === TimelinePhase.PHASE_2_RUPTURE) {
       if (!hasExplodedInPhase2) {
@@ -369,22 +369,22 @@ export function createFloatingTextNetwork(
     }
 
     // ========================================================================
-    // Phase 3 (15.0s – 21.0s，長度 6 秒)：倒退抹消與失重
-    // 15.0s 瞬間閃爍後突變為微觀質量 [XX × 10⁻³³ g]
+    // Phase 3 (18.0s – 22.5s，長度 4.5 秒)：倒退抹消與失重
+    // 18.0s 第二次反相閃爍瞬間突變為微觀質量 [XX × 10⁻³³ g]
     // 3D 網絡在背景環繞，隨著 2D 文字被刪除，3D 直線連線逐漸稀疏淡出 (0.85 -> 0.0)
     // ========================================================================
     if (phase === TimelinePhase.PHASE_3_ERASE) {
       group.visible = true;
       if (!isDisplayingMassUnit) {
-        console.log(`[FloatingTextNetwork] Phase 3 (15.0s 閃爍瞬間)：3D 關鍵字標籤突變為微觀質量 (bits → g)`);
+        console.log(`[FloatingTextNetwork] Phase 3 (18.0s 閃爍瞬間)：3D 關鍵字標籤突變為微觀質量 (bits → g)`);
         updateNodesSubTextUnit(true);
       }
-      const eraseProgress = Math.min(1.0, Math.max(0.0, phaseTime / 6.0)); // 0 -> 1 (6秒)
+      const eraseProgress = Math.min(1.0, Math.max(0.0, phaseTime / 4.5)); // 0 -> 1 (4.5秒)
       lineMaterial.opacity = Math.max(0.0, 0.85 * (1.0 - eraseProgress));
     }
 
     // ========================================================================
-    // Phase 4 (21.0s – 25.0s，長度 4 秒及待機常駐)：殘留與懸空（持續常駐微觀質量）
+    // Phase 4 (22.5s – 25.0s，長度 2.5 秒及待機常駐)：殘留與懸空（持續常駐微觀質量）
     // 3～5 個關鍵字在純白空間中緩慢漂浮自轉，微弱連線持續存在維持空間感
     // ========================================================================
     if (phase === TimelinePhase.PHASE_4_RESIDUAL) {

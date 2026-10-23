@@ -307,9 +307,14 @@
 					? new Date(item.timestamp).toLocaleTimeString()
 					: '';
 
-				const statusBadge = item.status === 'fallback'
-					? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-600 text-[10px]">Fallback</span>`
-					: `<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px]">AI OK</span>`;
+				const isFallback = item.status === 'fallback' || item.isFallback === true;
+				const durationText = typeof item.durationMs === 'number' && item.durationMs > 0
+					? `${(item.durationMs / 1000).toFixed(1)}s`
+					: '';
+
+				const statusBadge = isFallback
+					? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-600 font-mono text-[10px]">Fallback${durationText ? ` · ${durationText}` : ''}</span>`
+					: `<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-mono text-[10px]">AI OK${durationText ? ` · ${durationText}` : ''}</span>`;
 
 				li.innerHTML = `
 					<!-- Top Meta Row -->
@@ -351,7 +356,9 @@
 				text: item.originalText || item.text || '',
 				keywords: item.keywords || [],
 				timestamp: item.timestamp || Date.now(),
-				status: item.status || 'success'
+				durationMs: item.durationMs,
+				isFallback: item.isFallback,
+				status: item.status || (item.isFallback ? 'fallback' : 'success')
 			});
 			if (logs.length > MAX_LOGS) {
 				logs.pop();

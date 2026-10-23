@@ -51,12 +51,12 @@ function getHumanizedTypingDelay(charJustTyped: string, baseSpeed: number = 115)
   return Math.round(delay);
 }
 
-function getSelectiveBackspacingDelay(baseDeleteSpeed: number = 55): number {
-  return Math.max(30, Math.round(baseDeleteSpeed + (Math.random() * 20 - 10)));
+function getSelectiveBackspacingDelay(baseDeleteSpeed: number = 38): number {
+  return Math.max(25, Math.round(baseDeleteSpeed + (Math.random() * 16 - 8)));
 }
 
 function getKeywordRecognitionPause(): number {
-  return Math.round(250 + Math.random() * 100);
+  return Math.round(180 + Math.random() * 80);
 }
 
 function parseTextSegments(text: string, keywords: string[]): TextSegment[] {
@@ -151,7 +151,7 @@ export default function OverlayCenterText({
   const [residualText, setResidualText] = useState<string>("");
   const [isGlitchActive, setIsGlitchActive] = useState<boolean>(false);
 
-  // 配合第 12 秒演算法斷裂進入點與第 15 秒單位突變閃爍進入點，各觸發 180ms 的反相閃爍與故障效果
+  // 配合第 12 秒第一次閃爍進入點與第 18 秒第二次閃爍（單位突變 bits → g）進入點，各觸發 180ms 的反相閃爍與故障效果
   useEffect(() => {
     if (phase === TimelinePhase.PHASE_2_RUPTURE || phase === TimelinePhase.PHASE_3_ERASE) {
       setIsGlitchActive(true);
@@ -256,9 +256,10 @@ export default function OverlayCenterText({
     }
 
     // ========================================================================
-    // Phase 2 (12.0s – 15.0s，長度 3 秒)：演算法斷裂與關鍵字爆發
-    // 12.0s 瞬間爆發，數值與單位立即閃爍突變為公克格式 {m} g
-    // 2D 文字維持在畫面上，與背景 3D 炸出的關鍵字短暫重疊對照
+    // Phase 2 (12.0s – 18.0s，由 3 秒延長為 6 秒)：關鍵字凝固凝視
+    // 12.0s 第一次反相閃爍，3D 網絡與中央關鍵字同步浮現
+    // 此階段嚴禁切換公克，下方數值與 3D 標籤維持顯示 {B} bits 整整 6 秒
+    // 2D 文字維持在畫面上，與背景 3D 浮現的關鍵字對照
     // ========================================================================
     else if (phase === TimelinePhase.PHASE_2_RUPTURE) {
       setBeforeCursor(activeText);
@@ -268,9 +269,9 @@ export default function OverlayCenterText({
     }
 
     // ========================================================================
-    // Phase 3 (15.0s – 21.0s，長度 6 秒)：倒退抹消與失重
-    // 從第 15 秒啟動倒退刪除（45~75ms），遇到屬於 keywords 詞彙跳過不刪（停頓 250~350ms）
-    // 單位固定維持為 g，隨著非關鍵字逐字被 Backspace 抹去，數值同步動態遞減
+    // Phase 3 (18.0s – 22.5s，由 6 秒縮短為 4.5 秒)：倒退抹消與失重
+    // 18.0s 第二次反相閃爍瞬間，單位正式突變為微觀質量 {m} g
+    // 加快非關鍵文字的倒退刪除節奏，遇到 keywords 跳過不刪，數值動態遞減至殘留關鍵字重量
     // ========================================================================
     else if (phase === TimelinePhase.PHASE_3_ERASE) {
       setShowCursor(true);
@@ -284,10 +285,10 @@ export default function OverlayCenterText({
         .filter((s) => !s.isKeyword)
         .reduce((sum, s) => sum + s.text.length, 0);
 
-      // 基準刪除速率：確保在 4.5~5.0 秒內乾淨抹除非關鍵字
+      // 基準刪除速率：加快節奏，確保在 3.2~3.6 秒內乾淨抹除非關鍵字 (Phase 3 總長為 4.5s)
       const baseDelSpeed = Math.max(
-        40,
-        Math.min(75, Math.floor(4500 / Math.max(1, nonKwChars)))
+        25,
+        Math.min(55, Math.floor(3200 / Math.max(1, nonKwChars)))
       );
 
       const backspaceStep = () => {
@@ -361,10 +362,9 @@ export default function OverlayCenterText({
     }
 
     // ========================================================================
-    // Phase 4 (21.0s – 25.0s 及後續常駐)：殘留與懸空
-    // 2D 浮層只孤立保留被萃取的 3～5 個關鍵字，無聲停滯於畫面中央
-    // 數值定格於關鍵字的最終殘留質量（例如 2.30 × 10⁻³³ g）
-    // 演出結束向伺服器發送 DEVICE_IDLE 後，持續常駐顯示該殘留克數與關鍵字，絕不刷白
+    // Phase 4 (22.5s – 25.0s 及後續常駐，長度 2.5 秒)：殘留與懸空
+    // 2D 浮層只孤立保留被萃取的 3～5 個關鍵字，定格於最終質量
+    // 25.0s 準時觸發 DEVICE_IDLE 回報伺服器，畫面持續停留在此狀態，絕不刷白
     // ========================================================================
     else if (phase === TimelinePhase.PHASE_4_RESIDUAL) {
       const remainingKeywordsText = activeKeywords.join("   ");

@@ -159,17 +159,24 @@ export interface SocketTextSenderProps {
 export function SocketTextSender({
   showStatusIndicator = false,
 }: SocketTextSenderProps) {
+  const [mounted, setMounted] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [currentUrl] = useState(() => (typeof window !== "undefined" ? getSocketServerUrl() : ""));
-  const [uuid] = useState(() => (typeof window !== "undefined" ? getOrCreateUUID() : ""));
+  const [currentUrl, setCurrentUrl] = useState("");
+  const [uuid, setUuid] = useState("");
 
   useEffect(() => {
+    setMounted(true);
+    const url = getSocketServerUrl();
+    const id = getOrCreateUUID();
+    setCurrentUrl(url);
+    setUuid(id);
+
     // 取得全域共享的單一 Socket 實例
     const socket = getSharedSocket();
     setIsConnected(socket.connected);
 
     const onConnect = () => {
-      console.log(`[SocketTextSender] 連線成功: ${currentUrl} (User ID: ${uuid})`);
+      console.log(`[SocketTextSender] 連線成功: ${url} (User ID: ${id})`);
       setIsConnected(true);
     };
 
@@ -179,7 +186,7 @@ export function SocketTextSender({
     };
 
     const onConnectError = (err: Error) => {
-      console.warn(`[SocketTextSender] 連線失敗 (${currentUrl}):`, err.message);
+      console.warn(`[SocketTextSender] 連線失敗 (${url}):`, err.message);
       setIsConnected(false);
     };
 
@@ -192,9 +199,9 @@ export function SocketTextSender({
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
     };
-  }, [currentUrl, uuid]);
+  }, []);
 
-  if (!showStatusIndicator) return null;
+  if (!mounted || !showStatusIndicator) return null;
 
   return (
     <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-mono bg-white/90 backdrop-blur border border-stone-200 shadow-sm text-stone-600 select-none">
@@ -222,11 +229,16 @@ export function SocketTextSender({
  */
 export function useSocketTextSender() {
   const [isConnected, setIsConnected] = useState(false);
-  const [serverUrl] = useState(() => (typeof window !== "undefined" ? getSocketServerUrl() : ""));
-  const [userId] = useState(() => (typeof window !== "undefined" ? getOrCreateUUID() : ""));
+  const [serverUrl, setServerUrl] = useState("");
+  const [userId, setUserId] = useState("");
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
 
   useEffect(() => {
+    const url = getSocketServerUrl();
+    const id = getOrCreateUUID();
+    setServerUrl(url);
+    setUserId(id);
+
     // 取得全域共享的單一 Socket 實例
     const socket = getSharedSocket();
     socketRef.current = socket;
@@ -234,7 +246,7 @@ export function useSocketTextSender() {
 
     const onConnect = () => {
       setIsConnected(true);
-      console.log(`[useSocketTextSender] 已連線至: ${serverUrl} (User ID: ${userId})`);
+      console.log(`[useSocketTextSender] 已連線至: ${url} (User ID: ${id})`);
     };
 
     const onDisconnect = () => {
@@ -248,7 +260,7 @@ export function useSocketTextSender() {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
     };
-  }, [serverUrl, userId]);
+  }, []);
 
   const sendText = useCallback(
     (textToSend: string): Promise<{ success: boolean; message: string; id?: string }> => {
@@ -263,9 +275,10 @@ export function useSocketTextSender() {
           );
         }
 
+        const currentServer = serverUrl || getSocketServerUrl();
         const socket = socketRef.current || getSharedSocket();
         if (!socket || !socket.connected) {
-          return reject(new Error(`伺服器尚未連線 (${serverUrl})`));
+          return reject(new Error(`伺服器尚未連線 (${currentServer})`));
         }
 
         const currentId = userId || getOrCreateUUID();
@@ -303,9 +316,10 @@ export function useSocketTextSender() {
           return reject(new Error(`字數限制為 10 - 200 字 (目前輸入：${length} 字)`));
         }
 
+        const currentServer = serverUrl || getSocketServerUrl();
         const socket = socketRef.current || getSharedSocket();
         if (!socket || !socket.connected) {
-          return reject(new Error(`伺服器尚未連線 (${serverUrl})`));
+          return reject(new Error(`伺服器尚未連線 (${currentServer})`));
         }
 
         const currentId = userId || getOrCreateUUID();

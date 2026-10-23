@@ -10,6 +10,12 @@ process.on('unhandledRejection', (reason, promise) => {
 	console.error('[CRASH GUARD] 攔截到未處理的 Promise 拒絕 (unhandledRejection):', reason);
 });
 
+const dns = require('dns');
+// 🛡️ 強制 DNS 解析 IPv4 優先（避免 Node.js 18+ 在無 IPv6 路由環境下嘗試連線 Google API 導致 20~25 秒逾時卡頓）
+if (typeof dns.setDefaultResultOrder === 'function') {
+	dns.setDefaultResultOrder('ipv4first');
+}
+
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -84,7 +90,7 @@ const generateMessageId = () => {
 /**
  * 敏感詞與髒話過濾正則（確保本地保底抽取時若有其他詞彙可選，優先避開不雅詞彙）
  */
-const PROFANITY_REGEX = /幹|操|靠北|靠杯|他媽|三小|白痴|白癡|智障|機掰|雞掰|賤人|混蛋|王八|死八婆|fuck|shit|bitch|asshole|cunt/i;
+const PROFANITY_REGEX = /幹|操|靠北|靠杯|他媽|媽的|三小|白痴|白癡|智障|機掰|雞掰|賤人|混蛋|王八|死八婆|fuck|shit|bitch|asshole|cunt/i;
 
 /**
  * 輔助函式：純演算法本地保底切片（純原文切片，字數 2~4，前中後分佈採樣，絕無外部寫死字詞）
@@ -309,7 +315,7 @@ function sanitizeKeywords(rawKeywords, originalText) {
 }
 
 // 輔助函式：呼叫 Gemini API 分析文字（安全極簡呼叫，支援短暫尖峰重試）
-const GEMINI_TIMEOUT_MS = 25000;
+const GEMINI_TIMEOUT_MS = 7000; // 7 秒逾時（Gemini 3.1 Flash-Lite 正常回傳約 1 秒，逾時則快速切換以避免觀眾枯等）
 async function callGeminiSingle(text, config) {
 	const timeoutPromise = new Promise((_, reject) =>
 		setTimeout(() => reject(new Error('Gemini API 請求逾時')), GEMINI_TIMEOUT_MS)
@@ -323,10 +329,16 @@ async function callGeminiSingle(text, config) {
 }
 
 async function analyzeWithGemini(text) {
+	const startTime = Date.now();
+
 	if (!ai) {
 		console.warn('[Gemini] 未初始化 SDK，啟用本地保底切片');
 		const fallbackKw = extractFallbackKeywords(text);
-		return { keywords: sanitizeKeywords(fallbackKw, text), isFallback: true };
+		return {
+			keywords: sanitizeKeywords(fallbackKw, text),
+			isFallback: true,
+			durationMs: Date.now() - startTime,
+		};
 	}
 
 	try {
@@ -336,13 +348,14 @@ async function analyzeWithGemini(text) {
 				response = await callGeminiSingle(text, geminiConfig);
 				break;
 			} catch (err) {
-				console.error(`[Gemini] 第 ${attempt} 次呼叫失敗. Error Detail:`, err);
+				console.error(`[Gemini] 第 ${attempt} 次呼叫失敗. Error Detail:`, err?.message || err);
 				if (attempt < 2) {
-					await new Promise((r) => setTimeout(r, 1200));
+					await new Promise((r) => setTimeout(r, 800)); // 縮短重試間隔為 800ms
 				}
 			}
 		}
 
+		const durationMs = Date.now() - startTime;
 		let keywords = [];
 		const rawText =
 			response && typeof response.text === 'function'
@@ -353,7 +366,7 @@ async function analyzeWithGemini(text) {
 						? String(response.text).trim()
 						: '';
 
-		console.log(`[Gemini] API 回傳 Raw Text:\n${rawText || '(空值或未回傳)'}`);
+		console.log(`[Gemini] API 回傳 Raw Text (${durationMs}ms):\n${rawText || '(空值或未回傳)'}`);
 		if (response && !rawText) {
 			try {
 				console.log(`[Gemini] Response 詳細結構:`, JSON.stringify(response, null, 2));
@@ -380,17 +393,18 @@ async function analyzeWithGemini(text) {
 		if (!keywords || keywords.length === 0) {
 			const fallbackKw = extractFallbackKeywords(text);
 			const sanitizedKw = sanitizeKeywords(fallbackKw, text);
-			console.log(`[Gemini] 未能取得有效關鍵字，啟用本地保底關鍵字: [${sanitizedKw.join(', ')}]`);
-			return { keywords: sanitizedKw, isFallback: true };
+			console.log(`[Gemini] 未能取得有效關鍵字，啟用本地保底關鍵字 (${durationMs}ms): [${sanitizedKw.join(', ')}]`);
+			return { keywords: sanitizedKw, isFallback: true, durationMs };
 		}
 
 		const cleanKw = sanitizeKeywords(keywords, text);
-		console.log(`[Gemini] 解析成功並完成清洗: [${cleanKw.join(', ')}]`);
-		return { keywords: cleanKw, isFallback: false };
+		console.log(`[Gemini] 解析成功並完成清洗 (${durationMs}ms): [${cleanKw.join(', ')}]`);
+		return { keywords: cleanKw, isFallback: false, durationMs };
 	} catch (err) {
-		console.error('[Gemini] 分析過程發生例外. Error Detail:', err);
+		const durationMs = Date.now() - startTime;
+		console.error(`[Gemini] 分析過程發生例外 (${durationMs}ms). Error Detail:`, err);
 		const fallbackKw = extractFallbackKeywords(text);
-		return { keywords: sanitizeKeywords(fallbackKw, text), isFallback: true };
+		return { keywords: sanitizeKeywords(fallbackKw, text), isFallback: true, durationMs };
 	}
 }
 
@@ -664,10 +678,12 @@ async function processQueue() {
 		analysisResult = await analyzeWithGemini(currentItem.originalText);
 	} catch (err) {
 		console.error(`[Queue] 處理項目 ${currentItem.id} 時發生例外. Error Detail:`, err);
-		analysisResult = { keywords: extractFallbackKeywords(currentItem.originalText), isFallback: true };
+		analysisResult = { keywords: extractFallbackKeywords(currentItem.originalText), isFallback: true, durationMs: 0 };
 	}
 
 	const cleanKeywords = sanitizeKeywords(analysisResult?.keywords, currentItem.originalText);
+	const isFallback = Boolean(analysisResult?.isFallback);
+	const durationMs = typeof analysisResult?.durationMs === 'number' ? analysisResult.durationMs : 0;
 
 	if (cleanKeywords && cleanKeywords.length > 0) {
 		// --- 成功：組裝標準 MessageLog 並存入記憶體 ---
@@ -677,13 +693,15 @@ async function processQueue() {
 			originalText: currentItem.originalText,
 			keywords: cleanKeywords,
 			timestamp: Date.now(),
+			durationMs,
+			isFallback,
 			// 向下相容欄位
 			uuid: currentItem.userId,
 			text: currentItem.originalText,
-			status: 'success',
+			status: isFallback ? 'fallback' : 'success',
 		};
 
-		console.log(`[Queue] 分析成功: User ${processedEntry.userId} -> [${processedEntry.keywords.join(', ')}]`);
+		console.log(`[Queue] 分析成功 (${durationMs}ms, ${isFallback ? 'Fallback' : 'AI OK'}): User ${processedEntry.userId} -> [${processedEntry.keywords.join(', ')}]`);
 
 		// 本地日誌非同步追加寫入（Append-only Log 永久存檔備份，獨立 try/catch，絕不阻塞主流程與派發）
 		appendMessageArchive(processedEntry).catch((err) => {
@@ -719,7 +737,9 @@ async function processQueue() {
 			originalText: processedEntry.originalText,
 			keywords: processedEntry.keywords,
 			timestamp: processedEntry.timestamp,
-			message: '關鍵字分析完成',
+			durationMs,
+			isFallback,
+			message: isFallback ? '關鍵字分析完成（備用模式）' : '關鍵字分析完成',
 		};
 
 		if (currentItem.socketId) {

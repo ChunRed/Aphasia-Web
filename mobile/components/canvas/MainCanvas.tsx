@@ -196,7 +196,7 @@ export default function MainCanvas({
     const clock = new THREE.Clock();
 
     let hasTriggeredBurstAt12 = false;
-    let hasTriggeredGlitchAt15 = false;
+    let hasTriggeredGlitchAt18 = false;
     let lastHandledCycle = -1;
 
     const animate = () => {
@@ -213,7 +213,7 @@ export default function MainCanvas({
         if (cycleIndex !== lastHandledCycle) {
           lastHandledCycle = cycleIndex;
           hasTriggeredBurstAt12 = false;
-          hasTriggeredGlitchAt15 = false;
+          hasTriggeredGlitchAt18 = false;
         }
 
         // (A) 相機自轉更新
@@ -228,7 +228,7 @@ export default function MainCanvas({
         if (postProcessing) {
           if (phase === TimelinePhase.PHASE_1_ACCUMULATE) {
             hasTriggeredBurstAt12 = false;
-            hasTriggeredGlitchAt15 = false;
+            hasTriggeredGlitchAt18 = false;
             postProcessing.blockInvertPass.uniforms["uActive"].value = 0.0;
             const glitchUniforms = postProcessing.glitchPass.uniforms as Record<string, { value: unknown }>;
             if (glitchUniforms["byp"]) {
@@ -237,7 +237,7 @@ export default function MainCanvas({
           } else if (phase === TimelinePhase.PHASE_2_RUPTURE) {
             if (elapsedTime >= 12.0 && !hasTriggeredBurstAt12) {
               hasTriggeredBurstAt12 = true;
-              console.log(`[MainCanvas] Phase 2 (12.0s 瞬間爆發)：觸發 Monochrome Glitch + Block Invert Pass (以 bits 浮現)`);
+              console.log(`[MainCanvas] Phase 2 (12.0s 第一次閃爍爆發)：觸發 Monochrome Glitch + Block Invert Pass (以 bits 浮現)`);
               postProcessing.triggerBeatGlitch(GLITCH_CONFIG.phraseDropDuration);
               postProcessing.triggerBlockInvert(
                 GLITCH_CONFIG.blockInvertDuration,
@@ -245,9 +245,9 @@ export default function MainCanvas({
               );
             }
           } else if (phase === TimelinePhase.PHASE_3_ERASE) {
-            if (!hasTriggeredGlitchAt15) {
-              hasTriggeredGlitchAt15 = true;
-              console.log(`[MainCanvas] Phase 3 (15.0s 單位突變)：觸發 Monochrome Glitch + Block Invert Pass (bits → g)`);
+            if (!hasTriggeredGlitchAt18) {
+              hasTriggeredGlitchAt18 = true;
+              console.log(`[MainCanvas] Phase 3 (18.0s 第二次閃爍單位突變)：觸發 Monochrome Glitch + Block Invert Pass (bits → g)`);
               postProcessing.triggerBeatGlitch(GLITCH_CONFIG.phraseDropDuration);
               postProcessing.triggerBlockInvert(
                 GLITCH_CONFIG.blockInvertDuration,
