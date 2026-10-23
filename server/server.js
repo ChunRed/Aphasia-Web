@@ -406,7 +406,73 @@ const THROTTLE_INTERVAL_MS = 5000; // 5 秒頻率限制 (Throttling)
  *   timestamp: number;   // 建立時間戳記
  * }
  */
-const messageLogs = [];
+/**
+ * 內建 6 組開機種子資料（Default Presets）
+ */
+const SEED_PRESETS = [
+	{
+		id: 'seed-1',
+		userId: 'system-seed-1',
+		originalText: '對於組織文句這件事我曾經覺得很自豪過，覺得自己也許適合當個作家。',
+		keywords: ['作家', '自豪', '文句', '也許'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-1',
+		text: '對於組織文句這件事我曾經覺得很自豪過，覺得自己也許適合當個作家。',
+		status: 'success',
+	},
+	{
+		id: 'seed-2',
+		userId: 'system-seed-2',
+		originalText: '這是我的第738篇日記，其實每天寫日記就是一種記憶外包，寫下、然後假裝自己記得，其實都是交給電腦。',
+		keywords: ['日記', '記憶外包', '電腦', '記得'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-2',
+		text: '這是我的第738篇日記，其實每天寫日記就是一種記憶外包，寫下、然後假裝自己記得，其實都是交給電腦。',
+		status: 'success',
+	},
+	{
+		id: 'seed-3',
+		userId: 'system-seed-3',
+		originalText: '其實我也不知的為什麼寫下了這些話，只是好像自己正在失去重要的事物，匆忙的用文字記錄下，趕快撿起掉落的碎片，粗魯的用膠水黏起',
+		keywords: ['失去', '記錄', '碎片', '文字'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-3',
+		text: '其實我也不知的為什麼寫下了這些話，只是好像自己正在失去重要的事物，匆忙的用文字記錄下，趕快撿起掉落的碎片，粗魯的用膠水黏起',
+		status: 'success',
+	},
+	{
+		id: 'seed-4',
+		userId: 'system-seed-4',
+		originalText: '這些字終將離去、消除。僅存具有價值的部分，而其餘的文字，將只留在你的記憶中，逐漸模糊淡去。',
+		keywords: ['記憶', '文字', '價值', '模糊'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-4',
+		text: '這些字終將離去、消除。僅存具有價值的部分，而其餘的文字，將只留在你的記憶中，逐漸模糊淡去。',
+		status: 'success',
+	},
+	{
+		id: 'seed-5',
+		userId: 'system-seed-5',
+		originalText: '那些字只不過是過客，在這個演算法中他們不具任何價值，你注入的情感、無關緊要。',
+		keywords: ['演算法', '情感', '價值', '過客'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-5',
+		text: '那些字只不過是過客，在這個演算法中他們不具任何價值，你注入的情感、無關緊要。',
+		status: 'success',
+	},
+	{
+		id: 'seed-6',
+		userId: 'system-seed-6',
+		originalText: '人工智慧時代，那些漂亮的文字噼哩啪啦的不斷落下、快速堆疊出超乎自己能力的優美字詞。',
+		keywords: ['人工智慧', '文字', '能力', '優美'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-6',
+		text: '人工智慧時代，那些漂亮的文字噼哩啪啦的不斷落下、快速堆疊出超乎自己能力的優美字詞。',
+		status: 'success',
+	},
+];
+
+const messageLogs = [...SEED_PRESETS];
 const MAX_LOGS = 20;
 
 // 5.1 展示端多裝置識別與獨佔式輪流派工機制 (Worker Pool / Round-Robin)
@@ -638,6 +704,24 @@ io.on('connection', (socket) => {
 	const role = socket.handshake.query.role;
 	socket.isMonitor = (role === 'monitor' || role === 'server_page');
 
+	// 🛡️ Handshake Guard: 嚴格白名單 (1~6) 驗證
+	const ALLOWED_DEVICE_IDS = new Set(['1', '2', '3', '4', '5', '6']);
+	if (role === 'mobile') {
+		const reqDevId = String(
+			socket.handshake.query.deviceId ||
+			socket.handshake.query.deviceUuid ||
+			socket.handshake.query.uuid ||
+			''
+		).trim();
+
+		if (!ALLOWED_DEVICE_IDS.has(reqDevId)) {
+			console.warn(`[Handshake Guard] 拒絕非白名單 Mobile 裝置連線: "${reqDevId}" (Socket ID: ${socket.id})，立即強制中斷！`);
+			socket.emit('error', '403 Forbidden: Unauthorized Device (Allowed: 1~6)');
+			socket.disconnect(true);
+			return;
+		}
+	}
+
 	// 優先讀取 query.userId，若無則讀取 query.uuid 或 socket.id
 	const clientUserId =
 		socket.handshake.query.userId ||
@@ -652,7 +736,7 @@ io.on('connection', (socket) => {
 	if (socket.isMonitor) {
 		console.log(`[Socket.IO] Monitor dashboard connected: ${clientUserId}`);
 	} else {
-		console.log(`[Socket.IO] Client connected: ${clientUserId} (Socket ID: ${socket.id})`);
+		console.log(`[Socket.IO] Client connected: ${clientUserId} (Role: ${role || 'user'}, Socket ID: ${socket.id})`);
 	}
 
 	// 廣播連線人數
@@ -717,18 +801,27 @@ io.on('connection', (socket) => {
 	// 支援 Mobile 端的獨佔式 (Worker Pool / Round-Robin) 派工機制
 	// 1. Mobile 啟動連線完成，宣告就緒 (DEVICE_READY)
 	socket.on('DEVICE_READY', (data) => {
-		const devUuid =
+		const rawDevId = String(
 			(data && (data.deviceUuid || data.deviceId)) ||
-			socket.handshake.query.deviceUuid ||
 			socket.handshake.query.deviceId ||
-			socket.userId ||
-			socket.id;
+			socket.handshake.query.deviceUuid ||
+			''
+		).trim();
 
+		if (!ALLOWED_DEVICE_IDS.has(rawDevId)) {
+			console.warn(`[Handshake Guard] DEVICE_READY 拒絕非白名單裝置: "${rawDevId}" (Socket ID: ${socket.id})，立即強制中斷！`);
+			socket.emit('error', '403 Forbidden: Unauthorized Device (Allowed: 1~6)');
+			socket.disconnect(true);
+			return;
+		}
+		const devUuid = rawDevId;
+
+		const devStatus = (data && data.status) ? data.status : 'busy';
 		const existing = devicesMap.get(devUuid);
 		const connectedDevice = {
 			deviceUuid: devUuid,
 			socketId: socket.id,
-			status: 'idle',
+			status: devStatus,
 			lastAssignedAt: existing ? (existing.lastAssignedAt || 0) : 0,
 			socket,
 		};
@@ -738,20 +831,30 @@ io.on('connection', (socket) => {
 
 		const busyCount = Array.from(devicesMap.values()).filter((d) => d.status === 'busy').length;
 		const totalCount = devicesMap.size;
-		console.log(`[Dispatcher] Device [${devUuid}] connected and READY (Active: ${totalCount}, Busy: ${busyCount}/${totalCount}, Pending Messages: ${readyMessageQueue.length})`);
+		console.log(`[Dispatcher] Device [${devUuid}] connected and READY with status: ${devStatus} (Active: ${totalCount}, Busy: ${busyCount}/${totalCount}, Pending Messages: ${readyMessageQueue.length})`);
 
-		tryDispatchNext();
+		if (devStatus === 'idle') {
+			tryDispatchNext();
+		}
 	});
 
 	// 2. Mobile 完成一則訊息的視覺動態後，主動發送 DEVICE_IDLE 回報閒置
 	socket.on('DEVICE_IDLE', (data) => {
-		const devUuid =
+		const rawDevId = String(
 			(data && (data.deviceUuid || data.deviceId)) ||
 			socketToDeviceUuid.get(socket.id) ||
-			socket.handshake.query.deviceUuid ||
 			socket.handshake.query.deviceId ||
-			socket.userId ||
-			socket.id;
+			socket.handshake.query.deviceUuid ||
+			''
+		).trim();
+
+		if (!ALLOWED_DEVICE_IDS.has(rawDevId)) {
+			console.warn(`[Handshake Guard] DEVICE_IDLE 拒絕非白名單裝置: "${rawDevId}" (Socket ID: ${socket.id})，立即強制中斷！`);
+			socket.emit('error', '403 Forbidden: Unauthorized Device (Allowed: 1~6)');
+			socket.disconnect(true);
+			return;
+		}
+		const devUuid = rawDevId;
 
 		let dev = devicesMap.get(devUuid);
 		if (!dev) {

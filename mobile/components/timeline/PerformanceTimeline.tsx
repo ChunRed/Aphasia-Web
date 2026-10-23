@@ -9,7 +9,8 @@ import React, {
   useCallback,
   ReactNode,
 } from "react";
-import { useSocket, DispatchPayload } from "../socket/SocketManager";
+import { useSocket, DispatchPayload, getOrCreateDeviceUUID } from "../socket/SocketManager";
+import { getSeedPresetForDevice } from "@/config/seedPresets";
 
 /**
  * 演出生命週期 4 階段狀態定義 (Timeline States)
@@ -157,12 +158,17 @@ export function PerformanceTimelineProvider({
   initialPayload = null,
   autoReportIdle = true,
 }: PerformanceTimelineProviderProps) {
-  const { currentPayload: socketPayload, reportIdle } = useSocket();
+  const { currentPayload: socketPayload, reportIdle, deviceUuid } = useSocket();
 
-  // 演出資料狀態
-  const [activePayload, setActivePayload] = useState<DispatchPayload | null>(
-    initialPayload || socketPayload
-  );
+  // 演出資料狀態：開機無資料時優先指派該裝置對應之種子資料，徹底消除 5 秒空白
+  const initialOrSeed =
+    initialPayload ||
+    socketPayload ||
+    (typeof window !== "undefined"
+      ? getSeedPresetForDevice(deviceUuid || getOrCreateDeviceUUID())
+      : getSeedPresetForDevice(""));
+
+  const [activePayload, setActivePayload] = useState<DispatchPayload | null>(initialOrSeed);
   const activePayloadRef = useRef<DispatchPayload | null>(activePayload);
   activePayloadRef.current = activePayload;
 
@@ -215,6 +221,7 @@ export function PerformanceTimelineProvider({
       if (newPayload !== undefined) {
         setActivePayload(newPayload);
         activePayloadRef.current = newPayload;
+        lastHandledPayloadIdRef.current = newPayload?.id || null;
       }
 
       const frame = computeTimelineFrame(
@@ -239,7 +246,7 @@ export function PerformanceTimelineProvider({
   );
 
   // 監聽 Socket 派發之最新 payload（搶佔中斷 Preemption 核心）
-  const lastHandledPayloadIdRef = useRef<string | null>(null);
+  const lastHandledPayloadIdRef = useRef<string | null>(initialOrSeed?.id || null);
 
   useEffect(() => {
     if (socketPayload && socketPayload.id) {
@@ -276,18 +283,16 @@ export function PerformanceTimelineProvider({
             hasReportedIdleThisCycleRef.current = true;
             if (autoReportIdle) {
               console.log(
-                `[PerformanceTimeline] 25 秒演出週期結束，回報 DEVICE_IDLE`
+                `[PerformanceTimeline] 25 秒演出週期結束，回報 DEVICE_IDLE (常駐 Phase 4 待機)`
               );
               reportIdle();
             }
           }
 
-          // 無新訊息時的循環：淡出後自動重啟 25 秒 4 階段循環
-          startTimeRef.current = now;
-          hasReportedIdleThisCycleRef.current = false;
-          cycleIndexRef.current++;
-          setCycleIndex(cycleIndexRef.current);
-          rawElapsed = 0.0;
+          // 演出結束後的「常駐待機」邏輯（Hold on Last Frame）：
+          // 不清空畫面、不重播到空白狀態，時間軸停留在 25.0s (Phase 4 殘留懸空待機)
+          // 畫面持續維持在 Phase 4，直到有新的觀眾送出日記觸發 triggerPreempt
+          rawElapsed = TIMELINE_CONFIG.TOTAL_DURATION;
         }
 
         const frame = computeTimelineFrame(

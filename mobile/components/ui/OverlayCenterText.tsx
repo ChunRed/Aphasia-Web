@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { DispatchPayload } from "../socket/SocketManager";
+import { DispatchPayload, useSocket, getOrCreateDeviceUUID } from "../socket/SocketManager";
 import {
   usePerformanceTimeline,
   TimelinePhase,
 } from "../timeline/PerformanceTimeline";
+import { getSeedPresetForDevice } from "@/config/seedPresets";
 
 export interface OverlayCenterTextProps {
   payload?: DispatchPayload | null;
@@ -128,13 +129,19 @@ export default function OverlayCenterText({
     payload: timelinePayload,
     cycleIndex,
   } = usePerformanceTimeline();
+  const { deviceUuid } = useSocket();
+
+  const seedPreset = getSeedPresetForDevice(
+    deviceUuid || (typeof window !== "undefined" ? getOrCreateDeviceUUID() : "")
+  );
 
   const activePayload = propPayload !== undefined ? propPayload : timelinePayload;
-  const activeText = activePayload?.originalText || propText || defaultText;
+  const activeText =
+    activePayload?.originalText || propText || seedPreset?.originalText || defaultText;
   const activeKeywords =
     activePayload?.keywords && activePayload.keywords.length > 0
       ? activePayload.keywords
-      : [];
+      : seedPreset?.keywords || [];
 
   const [beforeCursor, setBeforeCursor] = useState<string>("");
   const [afterCursor, setAfterCursor] = useState<string>("");
@@ -329,7 +336,7 @@ export default function OverlayCenterText({
           WebkitBackdropFilter: "blur(14px)",
         }}
       >
-        <span className="font-mono text-xs sm:text-sm tracking-[0.35em] text-white uppercase font-medium inline-block text-center break-words leading-relaxed">
+        <span className="font-mono text-base sm:text-lg tracking-[0.35em] text-white uppercase font-medium inline-block text-center break-words leading-relaxed">
           <span>{beforeCursor}</span>
           {showCursor && (
             <span className="inline-block animate-pulse ml-0.5 opacity-90 text-white">_</span>

@@ -10,6 +10,8 @@ import {
   TimelinePhase,
   TimelineFrameData,
 } from "../timeline/PerformanceTimeline";
+import { useSocket, getOrCreateDeviceUUID } from "../socket/SocketManager";
+import { getSeedPresetForDevice } from "@/config/seedPresets";
 
 // ============================================================================
 // 🎛️ 故障後處理效果自訂參數（Glitch Post-Processing Configuration）
@@ -70,9 +72,19 @@ export default function MainCanvas({
 }: MainCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { subscribeFrame, payload: timelinePayload } = usePerformanceTimeline();
+  const { deviceUuid } = useSocket();
 
-  // 取得當前有效關鍵字
-  const activeKeywords = propKeywords || timelinePayload?.keywords || [];
+  // 取得裝置對應的預設種子關鍵字保底
+  const seedPreset = getSeedPresetForDevice(
+    deviceUuid || (typeof window !== "undefined" ? getOrCreateDeviceUUID() : "")
+  );
+
+  // 取得當前有效關鍵字，永遠確保陣列內至少有有效的字串元素
+  const rawKeywords = propKeywords || timelinePayload?.keywords;
+  const activeKeywords =
+    rawKeywords && rawKeywords.length > 0
+      ? rawKeywords
+      : (seedPreset?.keywords || ["作家", "自豪", "文句", "也許"]);
 
   const latestFrameDataRef = useRef<TimelineFrameData | null>(null);
   const activeKeywordsRef = useRef<string[]>(activeKeywords);
@@ -132,7 +144,11 @@ export default function MainCanvas({
     controls.maxDistance = 18.0;
 
     // 5. 核心 3D 視覺圖層：關鍵字節點與直線連線網絡 (FloatingTextNetwork)
-    const mergedTextConfig = { ...TEXT_NETWORK_CONFIG, ...textNetworkConfig };
+    const mergedTextConfig = {
+      ...TEXT_NETWORK_CONFIG,
+      fallbackKeywords: seedPreset?.keywords || ["作家", "自豪", "文句", "也許"],
+      ...textNetworkConfig,
+    };
     const floatingNetwork = createFloatingTextNetwork(mergedTextConfig);
     scene.add(floatingNetwork.group);
 
@@ -232,12 +248,13 @@ export default function MainCanvas({
           postProcessing.update(deltaTime);
         }
 
-        // (C) 3D 關鍵字網絡動態更新
+        // (C) 3D 關鍵字網絡動態更新（傳送連續運行時鐘 runningTime，確保 Phase 4 殘留待機時微弱連線與節點持續自轉漂浮）
+        const runningTime = clock.getElapsedTime();
         floatingNetwork.updateWithTimeline(
-          elapsedTime,
+          runningTime,
           phase,
           phaseTime,
-          elapsedTime,
+          runningTime,
           activeKeywordsRef.current
         );
 

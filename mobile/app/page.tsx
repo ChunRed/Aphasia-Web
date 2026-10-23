@@ -1,7 +1,8 @@
 "use client";
 
+import React, { useState, useEffect, Component, ReactNode, ErrorInfo } from "react";
 import dynamic from "next/dynamic";
-import { SocketManager, useSocket } from "@/components/socket/SocketManager";
+import { SocketManager, useSocket, getValidatedDeviceId } from "@/components/socket/SocketManager";
 import {
   PerformanceTimelineProvider,
   usePerformanceTimeline,
@@ -51,8 +52,6 @@ function TimelineIndicator() {
   );
 }
 
-import React, { Component, ReactNode, ErrorInfo } from "react";
-
 interface CanvasErrorBoundaryProps {
   children: ReactNode;
 }
@@ -89,7 +88,7 @@ function MobileDisplay() {
   useWakeLock();
 
   return (
-    <PerformanceTimelineProvider autoReportIdle={true}>
+    <PerformanceTimelineProvider autoReportIdle={true} initialPayload={currentPayload}>
       <main className="relative w-screen h-screen overflow-hidden bg-white select-none">
         {/* Timeline HUD Debug Indicator: [Timer: 12.4s | PHASE_2_RUPTURE] */}
         <TimelineIndicator />
@@ -107,8 +106,48 @@ function MobileDisplay() {
 }
 
 export default function Home() {
+  const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    const id = getValidatedDeviceId();
+    setDeviceId(id);
+    setIsChecking(false);
+  }, []);
+
+  // 1. 前端嚴格阻斷（Block & No-Socket）：
+  // 檢查中保持純黑背景，不發起連線、不渲染任何動畫或計時器
+  if (isChecking) {
+    return <main className="w-screen h-screen bg-black" />;
+  }
+
+  // 若為其他數值、格式錯誤或未提供參數 (非 1~6)：
+  // 立即中斷載入流程，不得發起 Socket.io 連線，不渲染任何 3D 場景、文字動畫或計時器。
+  // 畫面直接停留在純黑背景並顯示 403 Forbidden / Unauthorized Device 提示。
+  if (!deviceId) {
+    return (
+      <main className="flex flex-col items-center justify-center w-screen h-screen bg-black text-white select-none px-6">
+        <div className="flex flex-col items-center max-w-xs text-center border border-white/10 bg-white/[0.03] backdrop-blur-md px-6 py-8 rounded-lg shadow-2xl">
+          <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse mb-3" />
+          <h1 className="font-mono text-sm tracking-[0.3em] uppercase font-bold text-rose-400 mb-1">
+            403 Forbidden
+          </h1>
+          <p className="font-mono text-xs tracking-wider text-white/70 uppercase mb-4">
+            Unauthorized Device
+          </p>
+          <div className="border-t border-white/10 pt-3 w-full">
+            <span className="font-mono text-[10px] tracking-widest text-white/30 uppercase">
+              Access Limited: ?deviceId=1 ~ 6
+            </span>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // 只有合法白名單裝置 (1~6) 才會掛載 SocketManager 並發起連線
   return (
-    <SocketManager showIndicator={true}>
+    <SocketManager deviceId={deviceId} showIndicator={true}>
       <MobileDisplay />
     </SocketManager>
   );

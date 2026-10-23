@@ -40,6 +40,7 @@ export interface FloatingTextNetworkOptions {
   connectDistance?: number;
   nodeCount?: number;
   labels?: string[];
+  fallbackKeywords?: string[];
   lineColor?: number;
   textColor?: string;
 }
@@ -116,6 +117,7 @@ export function createFloatingTextNetwork(
     springTension = RHYTHM_CONFIG.SPRING_TENSION,
     connectDistance = 2.1,
     labels = [],
+    fallbackKeywords = ["作家", "自豪", "文句", "也許"],
     lineColor = 0x000000,
     textColor = "#000000",
   } = options;
@@ -159,9 +161,17 @@ export function createFloatingTextNetwork(
     });
     nodes.length = 0;
 
-    const filtered = targetLabels.filter((l) => typeof l === "string" && l.trim().length > 0);
-    const effectiveLabels = filtered;
+    const filtered = (targetLabels || []).filter((l) => typeof l === "string" && l.trim().length > 0);
+    // 永遠確保陣列內至少有有效的字串元素（若開機讀取尚未完成，優先取用預設關鍵字）
+    const effectiveLabels =
+      filtered.length > 0
+        ? filtered
+        : (fallbackKeywords && fallbackKeywords.length > 0
+            ? fallbackKeywords
+            : ["作家", "自豪", "文句", "也許"]
+          ).filter((l) => typeof l === "string" && l.trim().length > 0);
     const count = effectiveLabels.length;
+    lineGeometry.setDrawRange(0, 0);
     if (count === 0) return;
 
     for (let i = 0; i < count; i++) {
@@ -292,21 +302,16 @@ export function createFloatingTextNetwork(
     if (phase === TimelinePhase.PHASE_2_RUPTURE) {
       if (!hasExplodedInPhase2) {
         hasExplodedInPhase2 = true;
-        const effective = activeKeywords && activeKeywords.length > 0 ? activeKeywords : labels;
-        console.log(
-          `[FloatingTextNetwork] Phase 2 (12.0s 瞬間爆發)：彈射進場！關鍵字: [${(
-            effective || []
-          ).join(", ")}]`
+        const rawEffective = activeKeywords && activeKeywords.length > 0 ? activeKeywords : labels;
+        const effective = (rawEffective && rawEffective.length > 0 ? rawEffective : fallbackKeywords).filter(
+          (l) => typeof l === "string" && l.trim().length > 0
         );
-        if (effective && effective.length > 0) {
-          rebuildNodes(effective, true);
-          group.visible = true;
-          lineMaterial.opacity = 0.85;
-        } else {
-          rebuildNodes([], false);
-          group.visible = false;
-          lineMaterial.opacity = 0.0;
-        }
+        console.log(
+          `[FloatingTextNetwork] Phase 2 (12.0s 瞬間爆發)：彈射進場！關鍵字: [${effective.join(", ")}]`
+        );
+        rebuildNodes(effective, true);
+        group.visible = true;
+        lineMaterial.opacity = 0.85;
       }
     }
 
@@ -321,12 +326,12 @@ export function createFloatingTextNetwork(
     }
 
     // ========================================================================
-    // Phase 4 (21.0s – 25.0s，長度 4 秒)：殘留與懸空
-    // 連線完全消失，3～5 個關鍵字在純白空間中緩慢漂浮自轉
+    // Phase 4 (21.0s – 25.0s，長度 4 秒及待機常駐)：殘留與懸空
+    // 3～5 個關鍵字在純白空間中緩慢漂浮自轉，微弱連線持續存在維持空間感
     // ========================================================================
     if (phase === TimelinePhase.PHASE_4_RESIDUAL) {
       group.visible = true;
-      lineMaterial.opacity = 0.0;
+      lineMaterial.opacity = 0.16;
     }
 
     const currentNodeCount = nodes.length;
@@ -398,49 +403,65 @@ export function createFloatingTextNetwork(
     }
 
     // 連線幾何頂點更新（若 opacity > 0）
-    if (lineMaterial.opacity > 0.005) {
+    if (lineMaterial.opacity > 0.005 && currentNodeCount >= 2) {
       let segmentCount = 0;
       const posAttr = positionAttribute;
 
-      // 隨著連線淡出，可動態調整連線距離門檻使網絡連線更顯稀疏
-      const effectiveDistance =
-        phase === TimelinePhase.PHASE_3_ERASE
-          ? connectDistance * (0.6 + 0.4 * (1.0 - phaseTime / 6.0))
-          : connectDistance;
-
+      // 嚴格座標就位防護：確保所有節點座標已計算完成且為有限數值，防範未就位異常造成閃爍或連線消失
+      let allCoordsReady = true;
       for (let i = 0; i < currentNodeCount; i++) {
-        const posA = nodes[i].currentPos;
+        const p = nodes[i].currentPos;
+        if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) {
+          allCoordsReady = false;
+          break;
+        }
+      }
 
-        for (let j = i + 1; j < currentNodeCount; j++) {
-          const posB = nodes[j].currentPos;
-          const dist = posA.distanceTo(posB);
+      if (allCoordsReady) {
+        // 隨著連線淡出，可動態調整連線距離門檻使網絡連線更顯稀疏；Phase 4 待機連線維持適當距離連通
+        const effectiveDistance =
+          phase === TimelinePhase.PHASE_3_ERASE
+            ? connectDistance * (0.6 + 0.4 * (1.0 - phaseTime / 6.0))
+            : phase === TimelinePhase.PHASE_4_RESIDUAL
+            ? connectDistance * 1.35
+            : connectDistance;
 
-          if (dist <= effectiveDistance && segmentCount < MAX_PAIRS) {
+        for (let i = 0; i < currentNodeCount; i++) {
+          const posA = nodes[i].currentPos;
+
+          for (let j = i + 1; j < currentNodeCount; j++) {
+            const posB = nodes[j].currentPos;
+            const dist = posA.distanceTo(posB);
+
+            if (dist <= effectiveDistance && segmentCount < MAX_PAIRS) {
+              const vIdx = segmentCount * 2;
+              posAttr.setXYZ(vIdx, posA.x, posA.y, posA.z);
+              posAttr.setXYZ(vIdx + 1, posB.x, posB.y, posB.z);
+              segmentCount++;
+            }
+          }
+        }
+
+        // 基礎連通骨架（確保每個節點至少有一條連線）
+        if (segmentCount < currentNodeCount && currentNodeCount > 1 && lineMaterial.opacity > 0.08) {
+          for (let i = 0; i < currentNodeCount; i++) {
+            if (segmentCount >= MAX_PAIRS) break;
+            const nextIdx = (i + 1) % currentNodeCount;
+            const posA = nodes[i].currentPos;
+            const posB = nodes[nextIdx].currentPos;
+
             const vIdx = segmentCount * 2;
             posAttr.setXYZ(vIdx, posA.x, posA.y, posA.z);
             posAttr.setXYZ(vIdx + 1, posB.x, posB.y, posB.z);
             segmentCount++;
           }
         }
+
+        posAttr.needsUpdate = true;
+        lineGeometry.setDrawRange(0, segmentCount * 2);
+      } else {
+        lineGeometry.setDrawRange(0, 0);
       }
-
-      // 基礎連通骨架
-      if (segmentCount < currentNodeCount && currentNodeCount > 1 && lineMaterial.opacity > 0.2) {
-        for (let i = 0; i < currentNodeCount; i++) {
-          if (segmentCount >= MAX_PAIRS) break;
-          const nextIdx = (i + 1) % currentNodeCount;
-          const posA = nodes[i].currentPos;
-          const posB = nodes[nextIdx].currentPos;
-
-          const vIdx = segmentCount * 2;
-          posAttr.setXYZ(vIdx, posA.x, posA.y, posA.z);
-          posAttr.setXYZ(vIdx + 1, posB.x, posB.y, posB.z);
-          segmentCount++;
-        }
-      }
-
-      posAttr.needsUpdate = true;
-      lineGeometry.setDrawRange(0, segmentCount * 2);
     } else {
       lineGeometry.setDrawRange(0, 0);
     }
