@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createTextSprite, calculateStringBits, TextSpriteResult } from "./createTextSprite";
 import { TimelinePhase } from "../timeline/PerformanceTimeline";
+import { bitsToMassInGrams } from "@/utils/physics";
 
 export interface NodeData {
   id: number;
@@ -178,7 +179,8 @@ export function createFloatingTextNetwork(
       const textIndex = i;
       const label = effectiveLabels[i];
       const bits = calculateStringBits(label);
-      const subText = showBitsInfo ? `[${bits} bits]` : undefined;
+      const mass = bitsToMassInGrams(bits);
+      const subText = showBitsInfo ? `[${mass.formattedUnicode}]` : undefined;
 
       const phi = Math.acos(1 - (2 * (i + 0.5)) / count);
       const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
