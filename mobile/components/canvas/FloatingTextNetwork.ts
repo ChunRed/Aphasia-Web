@@ -155,7 +155,14 @@ export function createFloatingTextNetwork(
 
   let hasExplodedInPhase2 = false;
 
-  const rebuildNodes = (targetLabels: string[], triggerExplosion: boolean = true) => {
+  let isDisplayingMassUnit = false;
+
+  const rebuildNodes = (
+    targetLabels: string[],
+    triggerExplosion: boolean = true,
+    useMassUnit: boolean = false
+  ) => {
+    isDisplayingMassUnit = useMassUnit;
     nodes.forEach((n) => {
       group.remove(n.spriteResult.sprite);
       n.spriteResult.dispose();
@@ -179,8 +186,15 @@ export function createFloatingTextNetwork(
       const textIndex = i;
       const label = effectiveLabels[i];
       const bits = calculateStringBits(label);
-      const mass = bitsToMassInGrams(bits);
-      const subText = showBitsInfo ? `[${mass.formattedUnicode}]` : undefined;
+      let subText: string | undefined = undefined;
+      if (showBitsInfo) {
+        if (useMassUnit) {
+          const mass = bitsToMassInGrams(bits);
+          subText = `[${mass.formattedUnicode}]`;
+        } else {
+          subText = `[${bits} bits]`;
+        }
+      }
 
       const phi = Math.acos(1 - (2 * (i + 0.5)) / count);
       const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
@@ -238,7 +252,42 @@ export function createFloatingTextNetwork(
     }
   };
 
-  rebuildNodes(labels, false);
+  /**
+   * 在畫面觸發反相故障／閃爍時，將背景 3D 飄浮關鍵字標籤在 bits 與 g 之間即時熱切換
+   */
+  const updateNodesSubTextUnit = (toMass: boolean) => {
+    if (isDisplayingMassUnit === toMass || nodes.length === 0) return;
+    isDisplayingMassUnit = toMass;
+
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      let subText: string | undefined = undefined;
+      if (showBitsInfo) {
+        if (toMass) {
+          const mass = bitsToMassInGrams(node.bits);
+          subText = `[${mass.formattedUnicode}]`;
+        } else {
+          subText = `[${node.bits} bits]`;
+        }
+      }
+
+      const newSpriteResult = createTextSprite(node.label, {
+        fontSize,
+        color: textColor,
+        scale: textScale,
+        subText,
+        subTextRatio,
+      });
+
+      newSpriteResult.sprite.position.copy(node.currentPos);
+      group.remove(node.spriteResult.sprite);
+      node.spriteResult.dispose();
+      node.spriteResult = newSpriteResult;
+      group.add(newSpriteResult.sprite);
+    }
+  };
+
+  rebuildNodes(labels, false, false);
 
   const computeNextTarget = (node: NodeData, beatIndex: number) => {
     const isPhraseDrop = beatIndex % 8 === 0;
@@ -294,24 +343,26 @@ export function createFloatingTextNetwork(
       group.visible = false;
       lineMaterial.opacity = 0.0;
       hasExplodedInPhase2 = false;
+      isDisplayingMassUnit = false;
       return;
     }
 
     // ========================================================================
     // Phase 2 (12.0s – 15.0s)：演算法斷裂與關鍵字爆發
-    // 12.0s 瞬間爆發：彈簧物理阻尼 (Spring Drop) 從螢幕深處猛力拋出，拉出黑色直線網絡
+    // 12.0s 瞬間爆發：關鍵字初次浮現階段，嚴格顯示為位元數 [XX bits]
     // ========================================================================
     if (phase === TimelinePhase.PHASE_2_RUPTURE) {
       if (!hasExplodedInPhase2) {
         hasExplodedInPhase2 = true;
+        isDisplayingMassUnit = false;
         const rawEffective = activeKeywords && activeKeywords.length > 0 ? activeKeywords : labels;
         const effective = (rawEffective && rawEffective.length > 0 ? rawEffective : fallbackKeywords).filter(
           (l) => typeof l === "string" && l.trim().length > 0
         );
         console.log(
-          `[FloatingTextNetwork] Phase 2 (12.0s 瞬間爆發)：彈射進場！關鍵字: [${effective.join(", ")}]`
+          `[FloatingTextNetwork] Phase 2 (12.0s 關鍵字初次浮現)：以 [XX bits] 彈射進場！關鍵字: [${effective.join(", ")}]`
         );
-        rebuildNodes(effective, true);
+        rebuildNodes(effective, true, false); // useMassUnit = false ([XX bits])
         group.visible = true;
         lineMaterial.opacity = 0.85;
       }
@@ -319,20 +370,28 @@ export function createFloatingTextNetwork(
 
     // ========================================================================
     // Phase 3 (15.0s – 21.0s，長度 6 秒)：倒退抹消與失重
+    // 15.0s 瞬間閃爍後突變為微觀質量 [XX × 10⁻³³ g]
     // 3D 網絡在背景環繞，隨著 2D 文字被刪除，3D 直線連線逐漸稀疏淡出 (0.85 -> 0.0)
     // ========================================================================
     if (phase === TimelinePhase.PHASE_3_ERASE) {
       group.visible = true;
+      if (!isDisplayingMassUnit) {
+        console.log(`[FloatingTextNetwork] Phase 3 (15.0s 閃爍瞬間)：3D 關鍵字標籤突變為微觀質量 (bits → g)`);
+        updateNodesSubTextUnit(true);
+      }
       const eraseProgress = Math.min(1.0, Math.max(0.0, phaseTime / 6.0)); // 0 -> 1 (6秒)
       lineMaterial.opacity = Math.max(0.0, 0.85 * (1.0 - eraseProgress));
     }
 
     // ========================================================================
-    // Phase 4 (21.0s – 25.0s，長度 4 秒及待機常駐)：殘留與懸空
+    // Phase 4 (21.0s – 25.0s，長度 4 秒及待機常駐)：殘留與懸空（持續常駐微觀質量）
     // 3～5 個關鍵字在純白空間中緩慢漂浮自轉，微弱連線持續存在維持空間感
     // ========================================================================
     if (phase === TimelinePhase.PHASE_4_RESIDUAL) {
       group.visible = true;
+      if (!isDisplayingMassUnit) {
+        updateNodesSubTextUnit(true);
+      }
       lineMaterial.opacity = 0.16;
     }
 

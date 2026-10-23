@@ -151,13 +151,13 @@ export default function OverlayCenterText({
   const [residualText, setResidualText] = useState<string>("");
   const [isGlitchActive, setIsGlitchActive] = useState<boolean>(false);
 
-  // 配合第 12 秒演算法斷裂進入點，觸發 200ms 的反相閃爍與單位突變
+  // 配合第 12 秒演算法斷裂進入點與第 15 秒單位突變閃爍進入點，各觸發 180ms 的反相閃爍與故障效果
   useEffect(() => {
-    if (phase === TimelinePhase.PHASE_2_RUPTURE) {
+    if (phase === TimelinePhase.PHASE_2_RUPTURE || phase === TimelinePhase.PHASE_3_ERASE) {
       setIsGlitchActive(true);
       const timer = setTimeout(() => {
         setIsGlitchActive(false);
-      }, 200);
+      }, 180);
       return () => clearTimeout(timer);
     } else {
       setIsGlitchActive(false);
@@ -188,9 +188,6 @@ export default function OverlayCenterText({
   const currentMass = useMemo(() => {
     return bitsToMassInGrams(currentBits);
   }, [currentBits]);
-
-  // Phase 2 (12.0s 瞬間) 閃爍與單位突變判定（前 250ms 或 isGlitchActive 啟動閃爍動畫）
-  const isPhase2Burst = isGlitchActive || (phase === TimelinePhase.PHASE_2_RUPTURE && phaseTime <= 0.25);
 
   const timersRef = useRef<Array<NodeJS.Timeout>>([]);
   const activeGenerationRef = useRef<number>(0);
@@ -392,7 +389,7 @@ export default function OverlayCenterText({
 
   return (
     <>
-      {/* Phase 2 (12.0s 瞬間) 全螢幕反相 Glitch / 閃爍層 (約 100~200ms) */}
+      {/* 畫面反相故障／閃爍（Glitch Flash）瞬間特效 (約 120~180ms) */}
       {isGlitchActive && (
         <div
           className="fixed inset-0 z-50 pointer-events-none mix-blend-difference bg-white animate-pulse"
@@ -400,81 +397,38 @@ export default function OverlayCenterText({
         />
       )}
 
-      <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none select-none px-4">
+      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none select-none px-4 gap-3">
+        {/* 1. 黑底容器範圍收縮：只保留給訊息文字本身 */}
         <div
-          className={`max-w-[88vw] min-w-[280px] px-5 py-3.5 bg-black/85 backdrop-blur-md border rounded-sm shadow-2xl transition-all duration-300 flex flex-col items-center ${
-            isPhase2Burst
-              ? "animate-mutation-glitch border-white/80 ring-2 ring-amber-400/50"
-              : "border-white/20"
+          className={`max-w-[88vw] min-w-[260px] px-6 py-3.5 bg-black/85 backdrop-blur-md border rounded-sm shadow-2xl transition-all duration-300 flex items-center justify-center text-center ${
+            isGlitchActive ? "animate-mutation-glitch border-white/80" : "border-white/20"
           }`}
           style={{
             backdropFilter: "blur(14px)",
             WebkitBackdropFilter: "blur(14px)",
           }}
         >
-          {/* 主文字渲染區塊 */}
-          <span className="font-mono text-base sm:text-lg tracking-[0.35em] text-white uppercase font-medium inline-block text-center break-words leading-relaxed w-full">
+          <span className="font-mono text-base sm:text-lg tracking-[0.35em] text-white uppercase font-medium inline-block text-center break-words leading-relaxed">
             <span>{beforeCursor}</span>
             {showCursor && (
               <span className="inline-block animate-pulse ml-0.5 opacity-90 text-white">_</span>
             )}
             <span>{afterCursor}</span>
           </span>
+        </div>
 
-          {/* 下方數據列 (Data Metrics Row: bits → g 突變與動態衰變) */}
-          <div
-            className={`w-full pt-2.5 mt-2.5 border-t border-white/15 flex items-center justify-between text-[11px] sm:text-xs font-mono tracking-widest transition-all duration-200 ${
-              isPhase2Burst
-                ? "text-amber-300 font-bold scale-[1.02]"
-                : "text-white/80"
-            }`}
-          >
-            {/* 左側狀態標籤 */}
-            <div className="flex items-center gap-1.5 text-white/50 text-[10px] tracking-wider uppercase">
-              <span
-                className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
-                  phase === TimelinePhase.PHASE_1_ACCUMULATE
-                    ? "bg-emerald-400 animate-pulse"
-                    : phase === TimelinePhase.PHASE_2_RUPTURE
-                    ? "bg-amber-400 animate-ping"
-                    : phase === TimelinePhase.PHASE_3_ERASE
-                    ? "bg-rose-400"
-                    : "bg-cyan-400"
-                }`}
-              />
+        {/* 2. 數據列移至黑底之外：置於黑色訊息卡片正下方，置中純黑字，無任何背景底色或邊框，徹底移除冗餘前綴標籤 */}
+        <div className="w-full text-center select-none pt-1">
+          <div className="inline-block font-mono text-xs sm:text-sm tracking-[0.25em] text-black font-semibold tabular-nums">
+            {phase === TimelinePhase.PHASE_1_ACCUMULATE || phase === TimelinePhase.PHASE_2_RUPTURE ? (
+              <span>{currentBits.toLocaleString()} bits</span>
+            ) : (
               <span>
-                {phase === TimelinePhase.PHASE_1_ACCUMULATE
-                  ? "DIGITAL INFO"
-                  : phase === TimelinePhase.PHASE_2_RUPTURE
-                  ? "MASS RUPTURE"
-                  : phase === TimelinePhase.PHASE_3_ERASE
-                  ? "DECAYING MASS"
-                  : "RESIDUAL MASS"}
+                <span>{currentMass.mantissa} × 10</span>
+                <sup className="text-[10px] -top-1 ml-0.5 font-bold">{currentMass.exponent}</sup>
+                <span className="ml-1 font-sans">g</span>
               </span>
-            </div>
-
-            {/* 右側數值與單位（嚴格依物理常數換算與科學記號渲染） */}
-            <div className="font-semibold text-right tabular-nums">
-              {phase === TimelinePhase.PHASE_1_ACCUMULATE ? (
-                <span className="text-emerald-400/90 font-mono tracking-wide">
-                  {currentBits.toLocaleString()} bits
-                </span>
-              ) : (
-                <span
-                  className={`font-mono tracking-wide ${
-                    phase === TimelinePhase.PHASE_4_RESIDUAL
-                      ? "text-cyan-300"
-                      : isPhase2Burst
-                      ? "text-amber-300"
-                      : "text-white"
-                  }`}
-                >
-                  <span>{currentMass.mantissa} × 10</span>
-                  <sup className="text-[10px] -top-1 ml-0.5">{currentMass.exponent}</sup>
-                  <span className="ml-1 font-sans">g</span>
-                </span>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>
