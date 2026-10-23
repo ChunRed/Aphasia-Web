@@ -121,18 +121,28 @@ export const getValidatedDeviceId = (): AllowedDeviceId | null => {
     const params = new URLSearchParams(window.location.search);
     const raw = params.get("deviceId") || params.get("device_id") || params.get("id");
     
-    // 若 URL 明確帶有參數
+    // 1. 若 URL 明確帶有參數
     if (raw !== null && raw !== undefined && raw.trim() !== "") {
       const trimmed = raw.trim();
       if (isValidDeviceId(trimmed)) {
+        try {
+          localStorage.setItem("aphasia_deviceId", trimmed);
+        } catch {}
         return trimmed as AllowedDeviceId;
       }
       // 明確給了非 1~6 之非法值，一律阻擋（方便除錯與安全性驗證）
       return null;
     }
 
-    // 若未在 URL 提供 deviceId 參數：
-    // 本地開發 / 預覽環境 (localhost, 127.0.0.1, 區網 IP 或 development) 預設使用 "1"，支援開箱直接預覽
+    // 2. 若 URL 未帶參數，嘗試從 localStorage 還原（例如 iPhone 加入主畫面獨立模式啟動）
+    try {
+      const stored = localStorage.getItem("aphasia_deviceId");
+      if (stored && isValidDeviceId(stored.trim())) {
+        return stored.trim() as AllowedDeviceId;
+      }
+    } catch {}
+
+    // 3. 本地開發 / 預覽環境 (localhost, 127.0.0.1, 區網 IP 或 development) 預設使用 "1"，支援開箱直接預覽
     if (isLocalEnvironment()) {
       return "1";
     }

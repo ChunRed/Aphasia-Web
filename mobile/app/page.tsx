@@ -10,6 +10,7 @@ import {
 } from "@/components/timeline/PerformanceTimeline";
 import OverlayCenterText from "@/components/ui/OverlayCenterText";
 import { useWakeLock } from "@/hooks/useWakeLock";
+import { useDynamicManifest } from "@/hooks/useDynamicManifest";
 
 // Dynamically load the Three.js MainCanvas component with SSR disabled
 const MainCanvas = dynamic(
@@ -108,6 +109,9 @@ function MobileDisplay() {
 export default function Home() {
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(true);
+
+  // 前端動態抽換 Manifest 的 start_url，確保加入主畫面時包含 ?deviceId=X
+  useDynamicManifest(deviceId);
 
   useEffect(() => {
     const id = getValidatedDeviceId();
