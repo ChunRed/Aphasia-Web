@@ -533,15 +533,16 @@ function getNextIdleDevice() {
 }
 
 /**
- * 展場天平動力機構：非線性計算馬達運動幅度（0~255）與刪除字數 D
+ * 展場天平動力機構：非線性計算馬達運動幅度（100~255）與刪除字數 D
+ * 避免馬達低轉速扭力不足，並保持前 50 字高敏感度。
  * 輸入：originalText（原文）、keywords（字串陣列）
  * 計算刪除字數 D：
  *   K = sum(keyword.length)
  *   D = max(0, originalText.length - K)
- * 映射至 0 ~ 255（50 字以內加強動態級距）：
- *   若 D <= 0: motorValue = 0
- *   若 D <= 50: motorValue = Math.round((D / 50) * 180)
- *   若 D > 50: motorValue = Math.min(255, Math.round(180 + ((D - 50) / 130) * 75))
+ * 映射至 100 ~ 255：
+ *   若 D <= 0: motorValue = 100
+ *   若 D <= 50: motorValue = Math.round(100 + (D / 50) * 108)
+ *   若 D > 50: motorValue = Math.min(255, Math.round(208 + ((D - 50) / 130) * 47))
  *
  * @param {string} originalText 觀眾輸入原文
  * @param {string[]} keywords 關鍵字陣列
@@ -554,13 +555,13 @@ function calculateMotorDisplacement(originalText, keywords) {
 	const K = kwList.reduce((acc, kw) => acc + (typeof kw === 'string' ? kw.length : 0), 0);
 	const D = Math.max(0, text.length - K);
 
-	let motorValue = 0;
+	let motorValue = 100;
 	if (D <= 0) {
-		motorValue = 0;
+		motorValue = 100;
 	} else if (D <= 50) {
-		motorValue = Math.round((D / 50) * 180);
+		motorValue = Math.round(100 + (D / 50) * 108);
 	} else {
-		motorValue = Math.min(255, Math.round(180 + ((D - 50) / 130) * 75));
+		motorValue = Math.min(255, Math.round(208 + ((D - 50) / 130) * 47));
 	}
 
 	return {

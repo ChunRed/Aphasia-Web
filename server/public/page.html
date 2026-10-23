@@ -90,7 +90,7 @@
 				<div class="flex items-center justify-between text-xs font-mono text-stone-700">
 					<label for="motorSlider" class="font-medium flex items-center gap-2">
 						<span>馬達運動行程 (Motor Value)</span>
-						<span class="text-stone-400 font-normal">[0 ~ 255]</span>
+						<span class="text-stone-400 font-normal">[100 ~ 255]</span>
 					</label>
 					<div class="flex items-center gap-1.5 bg-white border border-stone-200 px-3 py-1 rounded-lg shadow-xs">
 						<span class="text-[10px] text-stone-400 font-bold uppercase tracking-wider">VALUE:</span>
@@ -100,16 +100,16 @@
 				<input 
 					id="motorSlider" 
 					type="range" 
-					min="0" 
+					min="100" 
 					max="255" 
 					value="180" 
 					class="w-full h-2 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
 				/>
 				<div class="flex justify-between text-[10px] text-stone-400 font-mono">
-					<span>0 (停止/復位)</span>
-					<span>64</span>
-					<span>128</span>
+					<span>100 (低速扭力基底)</span>
+					<span>140</span>
 					<span>180 (預設)</span>
+					<span>220</span>
 					<span>255 (最大行程)</span>
 				</div>
 			</div>
