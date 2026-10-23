@@ -397,9 +397,16 @@ export function SocketManager({
       console.log(`[SocketManager] 現有連線立即發送 DEVICE_READY (Device: ${currentDeviceUuid}, 狀態: ${deviceStatusRef.current})`);
     }
 
+    const handleUnauthorized = (data: { message?: string } | string) => {
+      const msg = typeof data === "string" ? data : data?.message || "403 Forbidden";
+      console.warn(`[SocketManager] 收到伺服器拒絕連線通知: ${msg}`);
+      setIsConnected(false);
+    };
+
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("connect_error", handleConnectError);
+    socket.on("unauthorized", handleUnauthorized);
     socket.on("DISPATCH_PAYLOAD", handleDispatchPayload);
     socket.on("new_text", handleNewText);
     socket.on("init_data", handleInitData);
@@ -408,6 +415,7 @@ export function SocketManager({
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.off("connect_error", handleConnectError);
+      socket.off("unauthorized", handleUnauthorized);
       socket.off("DISPATCH_PAYLOAD", handleDispatchPayload);
       socket.off("new_text", handleNewText);
       socket.off("init_data", handleInitData);

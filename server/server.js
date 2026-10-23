@@ -1,3 +1,15 @@
+// ============================================================================
+// 🛡️ 全域防崩潰保護 (Global Crash Guard)
+// 防止單一連線異常、未處理的 EventEmitter 錯誤或非同步例外導致展場伺服器中斷重啟
+// ============================================================================
+process.on('uncaughtException', (err, origin) => {
+	console.error(`[CRASH GUARD] 攔截到未捕獲例外 (uncaughtException) [來源: ${origin}]:`, err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+	console.error('[CRASH GUARD] 攔截到未處理的 Promise 拒絕 (unhandledRejection):', reason);
+});
+
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -716,7 +728,7 @@ io.on('connection', (socket) => {
 
 		if (!ALLOWED_DEVICE_IDS.has(reqDevId)) {
 			console.warn(`[Handshake Guard] 拒絕非白名單 Mobile 裝置連線: "${reqDevId}" (Socket ID: ${socket.id})，立即強制中斷！`);
-			socket.emit('error', '403 Forbidden: Unauthorized Device (Allowed: 1~6)');
+			socket.emit('unauthorized', { message: '403 Forbidden: Unauthorized Device (Allowed: 1~6)' });
 			socket.disconnect(true);
 			return;
 		}
@@ -810,7 +822,7 @@ io.on('connection', (socket) => {
 
 		if (!ALLOWED_DEVICE_IDS.has(rawDevId)) {
 			console.warn(`[Handshake Guard] DEVICE_READY 拒絕非白名單裝置: "${rawDevId}" (Socket ID: ${socket.id})，立即強制中斷！`);
-			socket.emit('error', '403 Forbidden: Unauthorized Device (Allowed: 1~6)');
+			socket.emit('unauthorized', { message: '403 Forbidden: Unauthorized Device (Allowed: 1~6)' });
 			socket.disconnect(true);
 			return;
 		}
@@ -850,7 +862,7 @@ io.on('connection', (socket) => {
 
 		if (!ALLOWED_DEVICE_IDS.has(rawDevId)) {
 			console.warn(`[Handshake Guard] DEVICE_IDLE 拒絕非白名單裝置: "${rawDevId}" (Socket ID: ${socket.id})，立即強制中斷！`);
-			socket.emit('error', '403 Forbidden: Unauthorized Device (Allowed: 1~6)');
+			socket.emit('unauthorized', { message: '403 Forbidden: Unauthorized Device (Allowed: 1~6)' });
 			socket.disconnect(true);
 			return;
 		}
