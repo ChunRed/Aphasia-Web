@@ -905,6 +905,12 @@ io.on('connection', (socket) => {
 		}
 	});
 
+	// 轉發 esp32-event 事件給所有連線之設備 (包含 ESP32 W5500)
+	socket.on('esp32-event', (data) => {
+		console.log(`[Socket.IO] Broadcast 'esp32-event' from ${socket.userId || socket.id}:`, data);
+		io.emit('esp32-event', data);
+	});
+
 	socket.on('disconnect', () => {
 		const devUuid = socketToDeviceUuid.get(socket.id);
 		if (devUuid) {
