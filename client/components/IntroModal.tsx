@@ -34,9 +34,18 @@ export default function IntroModal({ isOpen, onClose, onStartExperience }: Intro
           <ScrambleText text="互動理念 與 操作說明" trigger={isOpen} delay={150} duration={1000} />
         </h2>
 
-        {/* Empty placeholder paragraphs for user to edit */}
-        <div className="text-stone-500 text-xs sm:text-sm font-light tracking-widest leading-loose text-left whitespace-pre-line mb-8 min-h-[160px] overflow-y-auto px-1">
-          {"\n\n\n\n（此處留白，供後續填寫操作說明與互動理念）\n\n\n\n"}
+        {/* Concept and Instructions */}
+        <div className="text-stone-600 text-xs sm:text-sm font-light tracking-widest leading-relaxed text-left space-y-4 mb-8 max-h-[60vh] overflow-y-auto px-1">
+          <p>
+            全世界每天產生約 3.5 億 Terabytes的資訊，同等物質質量約為{" "}
+            <span className="font-mono font-normal">
+              8.93 × 10<sup>-14</sup>
+            </span>{" "}
+            公克，平均生成 1 bit 資訊僅需約 0.02 秒的時間。在龐大的數據流中，純粹用於表達主觀情感的字詞經判定不具備流通效益，屬於系統內的無效冗餘。
+          </p>
+          <p>
+            本系統將針對所接收的字元序列執行分析，提取最具使用價值的關鍵詞，並將其換算為等重物理質量，抹除其餘無關緊要的文字。
+          </p>
         </div>
 
         {/* Button */}
