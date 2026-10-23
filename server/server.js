@@ -955,6 +955,27 @@ io.on('connection', (socket) => {
 		io.emit('esp32-event', data);
 	});
 
+	// 支援監控控制台手動測試 ESP32 實體馬達
+	socket.on('ADMIN_TEST_ESP32', (data) => {
+		if (!data) return;
+		const deviceId = Number(data.deviceId);
+		const motorValue = Number(data.motorValue);
+
+		// 驗證 deviceId (1~6) 與 motorValue (0~255)
+		if (isNaN(deviceId) || deviceId < 1 || deviceId > 6) {
+			console.warn(`[Admin Test] 拒絕無效的裝置編號: ${data.deviceId}`);
+			return;
+		}
+		if (isNaN(motorValue) || motorValue < 0 || motorValue > 255) {
+			console.warn(`[Admin Test] 拒絕無效的馬達行程數值: ${data.motorValue}`);
+			return;
+		}
+
+		// 向全體廣播標準的硬體事件 [targetDeviceId, motorValue]
+		io.emit('esp32-event', [Number(data.deviceId), Number(data.motorValue)]);
+		console.log(`[Admin Test] Manual broadcast esp32-event -> Device: ${data.deviceId}, Value: ${data.motorValue}`);
+	});
+
 	socket.on('disconnect', () => {
 		const devUuid = socketToDeviceUuid.get(socket.id);
 		if (devUuid) {

@@ -71,6 +71,121 @@
 			</div>
 		</header>
 
+		<!-- Hardware Debug Console (ESP32 實體馬達測試控制台) -->
+		<section class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col gap-4">
+			<div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-100 pb-3 gap-2">
+				<div class="flex items-center gap-2.5">
+					<span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+					<h2 class="text-sm font-medium tracking-wide text-stone-800">
+						ESP32 實體馬達測試控制台 (Hardware Debug Console)
+					</h2>
+				</div>
+				<span class="text-[11px] text-stone-400 font-mono">
+					MANUAL OVERRIDE · PORT 80 EVENT DISPATCHER
+				</span>
+			</div>
+
+			<!-- Slider Row -->
+			<div class="flex flex-col gap-2 bg-stone-50 border border-stone-200/60 rounded-xl p-4">
+				<div class="flex items-center justify-between text-xs font-mono text-stone-700">
+					<label for="motorSlider" class="font-medium flex items-center gap-2">
+						<span>馬達運動行程 (Motor Value)</span>
+						<span class="text-stone-400 font-normal">[0 ~ 255]</span>
+					</label>
+					<div class="flex items-center gap-1.5 bg-white border border-stone-200 px-3 py-1 rounded-lg shadow-xs">
+						<span class="text-[10px] text-stone-400 font-bold uppercase tracking-wider">VALUE:</span>
+						<span id="motorSliderValue" class="text-sm font-bold text-indigo-600">180</span>
+					</div>
+				</div>
+				<input 
+					id="motorSlider" 
+					type="range" 
+					min="0" 
+					max="255" 
+					value="180" 
+					class="w-full h-2 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+				/>
+				<div class="flex justify-between text-[10px] text-stone-400 font-mono">
+					<span>0 (停止/復位)</span>
+					<span>64</span>
+					<span>128</span>
+					<span>180 (預設)</span>
+					<span>255 (最大行程)</span>
+				</div>
+			</div>
+
+			<!-- 6 Buttons Grid -->
+			<div>
+				<div class="flex items-center justify-between mb-2">
+					<p class="text-[11px] font-mono text-stone-500">
+						手動指定天平裝置廣播指令 (Target Device 1~6)：
+					</p>
+					<span class="text-[10px] text-stone-400 font-mono">Socket.IO: ADMIN_TEST_ESP32</span>
+				</div>
+				<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+					<button 
+						type="button" 
+						onclick="sendAdminTest(1, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 1</span>
+						<span>[ 測試天平 1 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(2, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 2</span>
+						<span>[ 測試天平 2 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(3, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 3</span>
+						<span>[ 測試天平 3 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(4, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 4</span>
+						<span>[ 測試天平 4 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(5, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 5</span>
+						<span>[ 測試天平 5 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(6, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 6</span>
+						<span>[ 測試天平 6 ]</span>
+					</button>
+				</div>
+			</div>
+
+			<!-- Debug Event Output Log Console -->
+			<div class="mt-1">
+				<div class="flex items-center justify-between text-[11px] font-mono text-stone-400 mb-1.5">
+					<span>硬體即時測試反饋 (Console Output)：</span>
+					<button type="button" onclick="clearTestLog()" class="hover:text-stone-600 underline cursor-pointer">清除紀錄</button>
+				</div>
+				<div id="testConsoleLog" class="bg-stone-900 text-stone-300 font-mono text-xs p-3.5 rounded-xl max-h-32 overflow-y-auto flex flex-col gap-1 shadow-inner border border-stone-800">
+					<div class="text-stone-500 italic text-[11px]">等待操作... 點擊上方按鈕手動發送測試指令至實體 ESP32</div>
+				</div>
+			</div>
+		</section>
+
 		<!-- Main Log List Section -->
 		<main class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col gap-4">
 			<div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-100 pb-3 gap-2">
@@ -297,6 +412,74 @@
 
 		socket.on('disconnect', () => {
 			console.log('[Socket.IO] Monitor disconnected');
+		});
+
+		// ====================================================================
+		// 4. ESP32 實體馬達測試控制台互動邏輯 (Hardware Debug Console)
+		// ====================================================================
+		const motorSlider = document.getElementById('motorSlider');
+		const motorSliderValue = document.getElementById('motorSliderValue');
+		const testConsoleLog = document.getElementById('testConsoleLog');
+
+		if (motorSlider && motorSliderValue) {
+			motorSlider.addEventListener('input', (e) => {
+				motorSliderValue.textContent = e.target.value;
+			});
+		}
+
+		function appendTestLog(msg, type = 'send') {
+			if (!testConsoleLog) return;
+			const time = new Date().toLocaleTimeString();
+			const item = document.createElement('div');
+			item.className = 'font-mono text-xs flex items-start gap-1.5 animate-slide-down';
+
+			if (type === 'broadcast') {
+				item.innerHTML = `<span class="text-emerald-400 font-semibold">[${time}]</span> <span class="text-emerald-300">${escapeHtml(msg)}</span>`;
+			} else {
+				item.innerHTML = `<span class="text-amber-400 font-semibold">[${time}]</span> <span class="text-stone-200">${escapeHtml(msg)}</span>`;
+			}
+
+			// 若只有預設提示文字則清空
+			if (testConsoleLog.querySelector('.italic')) {
+				testConsoleLog.innerHTML = '';
+			}
+			testConsoleLog.appendChild(item);
+			testConsoleLog.scrollTop = testConsoleLog.scrollHeight;
+		}
+
+		function clearTestLog() {
+			if (testConsoleLog) {
+				testConsoleLog.innerHTML = '<div class="text-stone-500 italic text-[11px]">已清空除錯紀錄</div>';
+			}
+		}
+
+		function sendAdminTest(deviceId, btnElement) {
+			const sliderEl = document.getElementById('motorSlider');
+			const sliderVal = sliderEl ? Number(sliderEl.value) : 180;
+
+			// 按鈕反饋動畫
+			if (btnElement) {
+				btnElement.classList.add('ring-2', 'ring-amber-500', 'bg-amber-100');
+				setTimeout(() => {
+					btnElement.classList.remove('ring-2', 'ring-amber-500', 'bg-amber-100');
+				}, 220);
+			}
+
+			// 透過 Socket.io 發送 ADMIN_TEST_ESP32 事件
+			socket.emit('ADMIN_TEST_ESP32', {
+				deviceId: Number(deviceId),
+				motorValue: Number(sliderVal)
+			});
+
+			// 在即時 Log 視窗印出
+			appendTestLog(`[Manual Test] Sent to Device ${deviceId} with value ${sliderVal}`, 'send');
+		}
+
+		// 監聽全域 esp32-event 廣播確認
+		socket.on('esp32-event', (data) => {
+			if (Array.isArray(data) && data.length >= 2) {
+				appendTestLog(`[Confirmed Broadcast] esp32-event -> Device: ${data[0]}, MotorValue: ${data[1]}`, 'broadcast');
+			}
 		});
 	</script>
 </body>

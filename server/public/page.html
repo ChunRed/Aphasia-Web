@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Server Monitor - Aphasia (Gemini Queue)</title>
+	<!-- Tailwind CSS CDN -->
+	<script src="https://cdn.tailwindcss.com"></script>
+	<!-- Socket.IO Client -->
+	<script src="/socket.io/socket.io.js"></script>
+	<style>
+		@keyframes slideDown {
+			from {
+				opacity: 0;
+				transform: translateY(-8px);
+			}
+			to {
+				opacity: 1;
+				transform: translateY(0);
+			}
+		}
+		.animate-slide-down {
+			animation: slideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+		}
+	</style>
+</head>
+<body class="min-h-screen bg-[#fafaf9] text-stone-800 font-sans antialiased p-4 sm:p-8 flex flex-col items-center">
+	<div class="w-full max-w-4xl flex flex-col gap-6">
+
+		<!-- Top Header: Title & Badges -->
+		<header class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+			<div>
+				<h1 class="text-xl sm:text-2xl font-light tracking-wider text-stone-900">
+					那些字已經無關緊要了
+				</h1>
+				<div class="flex items-center gap-2 mt-1">
+					<p class="text-xs text-stone-400 font-mono tracking-widest">
+						SOCKET.IO & GEMINI 3.1 FLASH LITE REAL-TIME PIPELINE
+					</p>
+				</div>
+			</div>
+
+			<!-- Status Badges Container -->
+			<div class="flex flex-wrap items-center gap-3">
+				<!-- Online Count Badge -->
+				<div class="flex items-center gap-2.5 bg-stone-50 border border-stone-200/60 rounded-xl px-3.5 py-2">
+					<div class="relative flex items-center justify-center">
+						<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping absolute"></span>
+						<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 relative"></span>
+					</div>
+					<div class="text-xs font-mono text-stone-600">
+						在線人數：
+						<span id="onlineCount" class="font-bold text-sm text-stone-900 ml-0.5">0</span>
+						<span class="text-stone-400">人</span>
+					</div>
+				</div>
+
+				<!-- Queue Status Badge (5s Throttling) -->
+				<div class="flex items-center gap-2.5 bg-stone-50 border border-stone-200/60 rounded-xl px-3.5 py-2">
+					<div class="relative flex items-center justify-center">
+						<span id="queueDotPing" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping absolute hidden"></span>
+						<span id="queueDot" class="w-2.5 h-2.5 rounded-full bg-stone-300 relative"></span>
+					</div>
+					<div class="text-xs font-mono text-stone-600">
+						待處理佇列：
+						<span id="queueCount" class="font-bold text-sm text-stone-900 ml-0.5">0</span>
+						<span class="text-stone-400">筆</span>
+						<span id="queueStatusText" class="text-[10px] ml-1 px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 font-normal">閒置</span>
+					</div>
+				</div>
+			</div>
+		</header>
+
+		<!-- Hardware Debug Console (ESP32 實體馬達測試控制台) -->
+		<section class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col gap-4">
+			<div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-100 pb-3 gap-2">
+				<div class="flex items-center gap-2.5">
+					<span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+					<h2 class="text-sm font-medium tracking-wide text-stone-800">
+						ESP32 實體馬達測試控制台 (Hardware Debug Console)
+					</h2>
+				</div>
+				<span class="text-[11px] text-stone-400 font-mono">
+					MANUAL OVERRIDE · PORT 80 EVENT DISPATCHER
+				</span>
+			</div>
+
+			<!-- Slider Row -->
+			<div class="flex flex-col gap-2 bg-stone-50 border border-stone-200/60 rounded-xl p-4">
+				<div class="flex items-center justify-between text-xs font-mono text-stone-700">
+					<label for="motorSlider" class="font-medium flex items-center gap-2">
+						<span>馬達運動行程 (Motor Value)</span>
+						<span class="text-stone-400 font-normal">[0 ~ 255]</span>
+					</label>
+					<div class="flex items-center gap-1.5 bg-white border border-stone-200 px-3 py-1 rounded-lg shadow-xs">
+						<span class="text-[10px] text-stone-400 font-bold uppercase tracking-wider">VALUE:</span>
+						<span id="motorSliderValue" class="text-sm font-bold text-indigo-600">180</span>
+					</div>
+				</div>
+				<input 
+					id="motorSlider" 
+					type="range" 
+					min="0" 
+					max="255" 
+					value="180" 
+					class="w-full h-2 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+				/>
+				<div class="flex justify-between text-[10px] text-stone-400 font-mono">
+					<span>0 (停止/復位)</span>
+					<span>64</span>
+					<span>128</span>
+					<span>180 (預設)</span>
+					<span>255 (最大行程)</span>
+				</div>
+			</div>
+
+			<!-- 6 Buttons Grid -->
+			<div>
+				<div class="flex items-center justify-between mb-2">
+					<p class="text-[11px] font-mono text-stone-500">
+						手動指定天平裝置廣播指令 (Target Device 1~6)：
+					</p>
+					<span class="text-[10px] text-stone-400 font-mono">Socket.IO: ADMIN_TEST_ESP32</span>
+				</div>
+				<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+					<button 
+						type="button" 
+						onclick="sendAdminTest(1, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 1</span>
+						<span>[ 測試天平 1 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(2, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 2</span>
+						<span>[ 測試天平 2 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(3, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 3</span>
+						<span>[ 測試天平 3 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(4, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 4</span>
+						<span>[ 測試天平 4 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(5, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 5</span>
+						<span>[ 測試天平 5 ]</span>
+					</button>
+					<button 
+						type="button" 
+						onclick="sendAdminTest(6, this)"
+						class="test-btn group flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl bg-stone-50 hover:bg-stone-900 border border-stone-200/90 hover:border-stone-900 text-stone-700 hover:text-white font-mono text-xs font-semibold shadow-xs transition-all duration-150 active:scale-95 active:bg-amber-600 select-none cursor-pointer"
+					>
+						<span class="text-[10px] text-stone-400 group-hover:text-stone-300 font-normal">DEVICE 6</span>
+						<span>[ 測試天平 6 ]</span>
+					</button>
+				</div>
+			</div>
+
+			<!-- Debug Event Output Log Console -->
+			<div class="mt-1">
+				<div class="flex items-center justify-between text-[11px] font-mono text-stone-400 mb-1.5">
+					<span>硬體即時測試反饋 (Console Output)：</span>
+					<button type="button" onclick="clearTestLog()" class="hover:text-stone-600 underline cursor-pointer">清除紀錄</button>
+				</div>
+				<div id="testConsoleLog" class="bg-stone-900 text-stone-300 font-mono text-xs p-3.5 rounded-xl max-h-32 overflow-y-auto flex flex-col gap-1 shadow-inner border border-stone-800">
+					<div class="text-stone-500 italic text-[11px]">等待操作... 點擊上方按鈕手動發送測試指令至實體 ESP32</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Main Log List Section -->
+		<main class="bg-white border border-stone-200/80 rounded-2xl p-6 shadow-sm flex flex-col gap-4">
+			<div class="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-100 pb-3 gap-2">
+				<div class="flex items-center gap-2">
+					<h2 class="text-sm font-medium tracking-wide text-stone-700">
+						已分析訊息記錄 (最新 20 則，每 5 秒派發)
+					</h2>
+					<span id="logCounter" class="text-[11px] font-mono px-2 py-0.5 bg-stone-100 text-stone-500 rounded-full">
+						0 / 20
+					</span>
+				</div>
+				<span class="text-[11px] text-stone-400 font-mono">
+					AI 標籤 · 佇列 FIFO
+				</span>
+			</div>
+
+			<!-- Message List Container -->
+			<ul id="logList" class="flex flex-col gap-3 min-h-[160px] max-h-[640px] overflow-y-auto pr-1">
+				<li id="emptyState" class="py-16 text-center text-xs text-stone-400 font-light tracking-widest">
+					尚無處理完成之日記訊息，等待客戶端傳送並排程分析中...
+				</li>
+			</ul>
+		</main>
+
+		<!-- Footer -->
+		<footer class="text-center text-[11px] text-stone-400 font-mono tracking-widest py-2">
+			GEMINI 3.1 FLASH LITE · 5-SEC THROTTLING QUEUE · REAL-TIME DISPATCHER
+		</footer>
+	</div>
+
+	<script>
+		// 1. 生成或讀取 localStorage 中的 UUID
+		function getOrCreateUUID() {
+			const KEY = 'aphasia_user_uuid';
+			let id = null;
+			try {
+				id = localStorage.getItem(KEY);
+				if (!id) {
+					if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+						id = crypto.randomUUID();
+					} else {
+						id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+							var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+							return v.toString(16);
+						});
+					}
+					localStorage.setItem(KEY, id);
+				}
+			} catch (e) {
+				id = 'temp-' + Math.random().toString(36).substring(2, 11);
+			}
+			return id;
+		}
+
+		const userUUID = getOrCreateUUID();
+
+		// 2. DOM 元素參考
+		const onlineCountEl = document.getElementById('onlineCount');
+		const queueCountEl = document.getElementById('queueCount');
+		const queueDotEl = document.getElementById('queueDot');
+		const queueDotPingEl = document.getElementById('queueDotPing');
+		const queueStatusTextEl = document.getElementById('queueStatusText');
+		const logListEl = document.getElementById('logList');
+		const logCounterEl = document.getElementById('logCounter');
+
+		// 內存中的最新 20 則訊息
+		let logs = [];
+		const MAX_LOGS = 20;
+
+		// 輔助防 XSS 跳脫
+		function escapeHtml(text) {
+			const div = document.createElement('div');
+			div.textContent = text || '';
+			return div.innerHTML;
+		}
+
+		// 更新佇列 UI
+		function updateQueueUI(pendingCount, isProcessing) {
+			if (queueCountEl) queueCountEl.textContent = pendingCount || 0;
+			if (isProcessing) {
+				queueDotEl.className = 'w-2.5 h-2.5 rounded-full bg-amber-500 relative';
+				queueDotPingEl.classList.remove('hidden');
+				queueStatusTextEl.textContent = '分析中';
+				queueStatusTextEl.className = 'text-[10px] ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium';
+			} else {
+				queueDotEl.className = 'w-2.5 h-2.5 rounded-full bg-stone-300 relative';
+				queueDotPingEl.classList.add('hidden');
+				queueStatusTextEl.textContent = '閒置';
+				queueStatusTextEl.className = 'text-[10px] ml-1 px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 font-normal';
+			}
+		}
+
+		// 渲染整個訊息清單
+		function renderLogs() {
+			if (logs.length === 0) {
+				logListEl.innerHTML = `
+					<li id="emptyState" class="py-16 text-center text-xs text-stone-400 font-light tracking-widest">
+						尚無處理完成之日記訊息，等待客戶端傳送並排程分析中...
+					</li>
+				`;
+				logCounterEl.textContent = '0 / 20';
+				return;
+			}
+
+			logCounterEl.textContent = `${logs.length} / ${MAX_LOGS}`;
+			logListEl.innerHTML = '';
+
+			logs.forEach((item, index) => {
+				const li = document.createElement('li');
+				li.className = 'p-4 rounded-xl bg-stone-50 border border-stone-200/70 font-mono text-xs text-stone-800 break-words flex flex-col gap-2.5 leading-relaxed' + (index === 0 ? ' animate-slide-down' : '');
+
+				// 關鍵字標籤渲染
+				const keywords = Array.isArray(item.keywords) ? item.keywords : [];
+				const keywordsHtml = keywords.length > 0
+					? keywords.map(kw => `<span class="px-2 py-0.5 rounded-md bg-stone-900 text-stone-50 font-sans text-xs tracking-wide shadow-sm">${escapeHtml(kw)}</span>`).join(' ')
+					: '<span class="text-stone-400 italic text-[11px]">無關鍵字</span>';
+
+				const timeStr = item.timestamp
+					? new Date(item.timestamp).toLocaleTimeString()
+					: '';
+
+				const statusBadge = item.status === 'fallback'
+					? `<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-600 text-[10px]">Fallback</span>`
+					: `<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px]">AI OK</span>`;
+
+				li.innerHTML = `
+					<!-- Top Meta Row -->
+					<div class="flex items-center justify-between text-[11px] text-stone-400 border-b border-stone-200/50 pb-1.5">
+						<div class="flex items-center gap-2">
+							<span class="text-stone-400 font-mono text-[10px]">USER:</span>
+							<span class="text-stone-700 font-medium font-mono select-all">${escapeHtml((item.userId || item.uuid || 'unknown').slice(0, 18))}</span>
+							${item.id ? `<span class="text-stone-400 font-mono text-[10px]">[${escapeHtml(item.id.slice(0, 12))}]</span>` : ''}
+						</div>
+						<div class="flex items-center gap-2">
+							${statusBadge}
+							<span class="font-mono text-[10px]">${timeStr}</span>
+						</div>
+					</div>
+
+					<!-- Diary Text Body -->
+					<div class="text-stone-800 font-sans text-sm leading-relaxed pl-1 border-l-2 border-stone-300">
+						${escapeHtml(item.originalText || item.text || '')}
+					</div>
+
+					<!-- Extracted Keywords Tags -->
+					<div class="flex flex-wrap items-center gap-1.5 pt-1">
+						<span class="text-[10px] text-stone-400 font-mono uppercase tracking-wider mr-1">KEYWORDS:</span>
+						${keywordsHtml}
+					</div>
+				`;
+
+				logListEl.appendChild(li);
+			});
+		}
+
+		// 新增單筆訊息
+		function addMessageLog(item) {
+			logs.unshift({
+				id: item.id || '',
+				userId: item.userId || item.uuid || 'unknown',
+				uuid: item.userId || item.uuid || 'unknown',
+				originalText: item.originalText || item.text || '',
+				text: item.originalText || item.text || '',
+				keywords: item.keywords || [],
+				timestamp: item.timestamp || Date.now(),
+				status: item.status || 'success'
+			});
+			if (logs.length > MAX_LOGS) {
+				logs.pop();
+			}
+			renderLogs();
+		}
+
+		// 3. 連線 Socket.IO 並夾帶 UUID 與 role: 'monitor' (不計入使用者連線人數)
+		const socket = io({
+			query: {
+				uuid: userUUID,
+				role: 'monitor'
+			}
+		});
+
+		// 剛連線時接收伺服器目前的初始狀態 (人數、最新 20 則訊息、佇列長度)
+		socket.on('init_data', (data) => {
+			if (data && typeof data.onlineCount === 'number') {
+				onlineCountEl.textContent = data.onlineCount;
+			}
+			if (data && Array.isArray(data.logs)) {
+				logs = data.logs.slice(0, MAX_LOGS);
+				renderLogs();
+			}
+			if (data) {
+				updateQueueUI(data.queueLength || 0, data.isProcessing || false);
+			}
+		});
+
+		// 即時連線人數更新
+		socket.on('online_count', (count) => {
+			onlineCountEl.textContent = count;
+		});
+
+		// 即時佇列狀態更新
+		socket.on('queue_status', (status) => {
+			if (status) {
+				updateQueueUI(status.pendingCount || 0, status.isProcessing || false);
+			}
+		});
+
+		// 即時接收新分析完畢的訊息
+		socket.on('new_processed_entry', (item) => {
+			addMessageLog(item);
+		});
+
+		// 相容舊事件（若未發送 new_processed_entry）
+		socket.on('new_message_log', (item) => {
+			// 若已透過 new_processed_entry 加入則避免重複
+			if (!logs.some(l => l.id && item.id && l.id === item.id)) {
+				addMessageLog(item);
+			}
+		});
+
+		socket.on('connect', () => {
+			console.log('[Socket.IO] Monitor connected, UUID:', userUUID);
+		});
+
+		socket.on('disconnect', () => {
+			console.log('[Socket.IO] Monitor disconnected');
+		});
+
+		// ====================================================================
+		// 4. ESP32 實體馬達測試控制台互動邏輯 (Hardware Debug Console)
+		// ====================================================================
+		const motorSlider = document.getElementById('motorSlider');
+		const motorSliderValue = document.getElementById('motorSliderValue');
+		const testConsoleLog = document.getElementById('testConsoleLog');
+
+		if (motorSlider && motorSliderValue) {
+			motorSlider.addEventListener('input', (e) => {
+				motorSliderValue.textContent = e.target.value;
+			});
+		}
+
+		function appendTestLog(msg, type = 'send') {
+			if (!testConsoleLog) return;
+			const time = new Date().toLocaleTimeString();
+			const item = document.createElement('div');
+			item.className = 'font-mono text-xs flex items-start gap-1.5 animate-slide-down';
+
+			if (type === 'broadcast') {
+				item.innerHTML = `<span class="text-emerald-400 font-semibold">[${time}]</span> <span class="text-emerald-300">${escapeHtml(msg)}</span>`;
+			} else {
+				item.innerHTML = `<span class="text-amber-400 font-semibold">[${time}]</span> <span class="text-stone-200">${escapeHtml(msg)}</span>`;
+			}
+
+			// 若只有預設提示文字則清空
+			if (testConsoleLog.querySelector('.italic')) {
+				testConsoleLog.innerHTML = '';
+			}
+			testConsoleLog.appendChild(item);
+			testConsoleLog.scrollTop = testConsoleLog.scrollHeight;
+		}
+
+		function clearTestLog() {
+			if (testConsoleLog) {
+				testConsoleLog.innerHTML = '<div class="text-stone-500 italic text-[11px]">已清空除錯紀錄</div>';
+			}
+		}
+
+		function sendAdminTest(deviceId, btnElement) {
+			const sliderEl = document.getElementById('motorSlider');
+			const sliderVal = sliderEl ? Number(sliderEl.value) : 180;
+
+			// 按鈕反饋動畫
+			if (btnElement) {
+				btnElement.classList.add('ring-2', 'ring-amber-500', 'bg-amber-100');
+				setTimeout(() => {
+					btnElement.classList.remove('ring-2', 'ring-amber-500', 'bg-amber-100');
+				}, 220);
+			}
+
+			// 透過 Socket.io 發送 ADMIN_TEST_ESP32 事件
+			socket.emit('ADMIN_TEST_ESP32', {
+				deviceId: Number(deviceId),
+				motorValue: Number(sliderVal)
+			});
+
+			// 在即時 Log 視窗印出
+			appendTestLog(`[Manual Test] Sent to Device ${deviceId} with value ${sliderVal}`, 'send');
+		}
+
+		// 監聽全域 esp32-event 廣播確認
+		socket.on('esp32-event', (data) => {
+			if (Array.isArray(data) && data.length >= 2) {
+				appendTestLog(`[Confirmed Broadcast] esp32-event -> Device: ${data[0]}, MotorValue: ${data[1]}`, 'broadcast');
+			}
+		});
+	</script>
+</body>
+</html>
