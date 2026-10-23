@@ -56,10 +56,9 @@ export default function ScrambleText({
       return;
     }
 
-    let timeoutId: NodeJS.Timeout;
     let intervalId: NodeJS.Timeout;
 
-    timeoutId = setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       const length = text.length;
       if (length === 0) return;
 

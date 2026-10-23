@@ -533,6 +533,44 @@ function getNextIdleDevice() {
 }
 
 /**
+ * 展場天平動力機構：非線性計算馬達運動幅度（0~255）與刪除字數 D
+ * 輸入：originalText（原文）、keywords（字串陣列）
+ * 計算刪除字數 D：
+ *   K = sum(keyword.length)
+ *   D = max(0, originalText.length - K)
+ * 映射至 0 ~ 255（50 字以內加強動態級距）：
+ *   若 D <= 0: motorValue = 0
+ *   若 D <= 50: motorValue = Math.round((D / 50) * 180)
+ *   若 D > 50: motorValue = Math.min(255, Math.round(180 + ((D - 50) / 130) * 75))
+ *
+ * @param {string} originalText 觀眾輸入原文
+ * @param {string[]} keywords 關鍵字陣列
+ * @returns {{ motorValue: number, D: number, deletedCount: number }}
+ */
+function calculateMotorDisplacement(originalText, keywords) {
+	const text = typeof originalText === 'string' ? originalText : '';
+	const kwList = Array.isArray(keywords) ? keywords : [];
+
+	const K = kwList.reduce((acc, kw) => acc + (typeof kw === 'string' ? kw.length : 0), 0);
+	const D = Math.max(0, text.length - K);
+
+	let motorValue = 0;
+	if (D <= 0) {
+		motorValue = 0;
+	} else if (D <= 50) {
+		motorValue = Math.round((D / 50) * 180);
+	} else {
+		motorValue = Math.min(255, Math.round(180 + ((D - 50) / 130) * 75));
+	}
+
+	return {
+		motorValue,
+		D,
+		deletedCount: D,
+	};
+}
+
+/**
  * 核心獨佔式派發函式 (嚴格精準單發，絕不使用 io.emit 廣播展示內容)
  */
 function tryDispatchNext() {
@@ -560,6 +598,12 @@ function tryDispatchNext() {
 
 		// 嚴格獨佔單發，僅發給該裝置的 socketId
 		io.to(targetDevice.socketId).emit('DISPATCH_PAYLOAD', payload);
+
+		// 展場實體天平動力機構 (ESP32) 連動廣播
+		const targetDeviceId = targetDevice.deviceUuid;
+		const { motorValue, D } = calculateMotorDisplacement(payload.originalText, payload.keywords);
+		io.emit('esp32-event', [Number(targetDeviceId), motorValue]);
+		console.log(`[IoT] Broadcast esp32-event -> Device ${targetDeviceId}, Deleted: ${D}, MotorValue: ${motorValue}`);
 
 		const busyCount = Array.from(devicesMap.values()).filter((d) => d.status === 'busy').length;
 		const totalCount = devicesMap.size;
@@ -948,3 +992,9 @@ server.listen(PORT, '0.0.0.0', () => {
 	console.log(`[ArchiveLog] Append-only Log: ${ARCHIVE_FILE}`);
 	console.log(`===============================================`);
 });
+
+module.exports = {
+	calculateMotorDisplacement,
+	sanitizeKeywords,
+	extractFallbackKeywords,
+};

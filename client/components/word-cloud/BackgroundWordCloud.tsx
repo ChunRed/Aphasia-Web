@@ -22,7 +22,6 @@ export const BackgroundWordCloud: React.FC<BackgroundWordCloudProps> = ({
   useEffect(() => {
     const updateDimensions = () => {
       const w = window.innerWidth;
-      const h = window.innerHeight;
       // Dynamically adapt layout canvas aspect ratio based on device orientation
       if (w < 768) {
         // Mobile portrait canvas (700 x 1200) ensures words spread from top to bottom on phone screens

@@ -193,7 +193,7 @@ export function createDynamicLine(
 
     // 初始 3D 座標
     let x = r * Math.cos(theta);
-    let y = r * Math.sin(theta);
+    const y = r * Math.sin(theta);
     let z = zMod;
 
     // 扭轉波變形

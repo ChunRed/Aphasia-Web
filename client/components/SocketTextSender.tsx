@@ -157,28 +157,19 @@ export interface SocketTextSenderProps {
  * 負責維護與 Socket.IO 伺服器的連線，並將 localStorage 的 UUID / userId 回傳給 Server
  */
 export function SocketTextSender({
-  onSendSuccess,
-  onSendError,
   showStatusIndicator = false,
 }: SocketTextSenderProps) {
   const [isConnected, setIsConnected] = useState(false);
-  const [currentUrl, setCurrentUrl] = useState("");
-  const [uuid, setUuid] = useState("");
-  const socketRef = useRef<SocketIOClient.Socket | null>(null);
+  const [currentUrl] = useState(() => (typeof window !== "undefined" ? getSocketServerUrl() : ""));
+  const [uuid] = useState(() => (typeof window !== "undefined" ? getOrCreateUUID() : ""));
 
   useEffect(() => {
-    const targetUrl = getSocketServerUrl();
-    const userUUID = getOrCreateUUID();
-    setCurrentUrl(targetUrl);
-    setUuid(userUUID);
-
     // 取得全域共享的單一 Socket 實例
     const socket = getSharedSocket();
-    socketRef.current = socket;
     setIsConnected(socket.connected);
 
     const onConnect = () => {
-      console.log(`[SocketTextSender] 連線成功: ${targetUrl} (User ID: ${userUUID})`);
+      console.log(`[SocketTextSender] 連線成功: ${currentUrl} (User ID: ${uuid})`);
       setIsConnected(true);
     };
 
@@ -188,7 +179,7 @@ export function SocketTextSender({
     };
 
     const onConnectError = (err: Error) => {
-      console.warn(`[SocketTextSender] 連線失敗 (${targetUrl}):`, err.message);
+      console.warn(`[SocketTextSender] 連線失敗 (${currentUrl}):`, err.message);
       setIsConnected(false);
     };
 
@@ -201,59 +192,7 @@ export function SocketTextSender({
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
     };
-  }, []);
-
-  // 傳送文字方法（嚴格驗證 10 - 200 字限制，帶入 userId 與 text）
-  const sendText = useCallback(
-    (textToSend: string): Promise<{ success: boolean; message: string; id?: string }> => {
-      return new Promise((resolve, reject) => {
-        const trimmed = textToSend ? textToSend.trim() : "";
-        const length = trimmed.length;
-
-        // 規則檢驗：限制 10 - 200 字
-        if (length < 10 || length > 200) {
-          const errMsg = `字數不符合規則，限制為 10 - 200 字 (目前輸入：${length} 字)`;
-          onSendError?.(errMsg);
-          return reject(new Error(errMsg));
-        }
-
-        const socket = socketRef.current || getSharedSocket();
-        if (!socket || !socket.connected) {
-          const errMsg = `Socket.IO 尚未連線至伺服器 (${currentUrl})`;
-          onSendError?.(errMsg);
-          return reject(new Error(errMsg));
-        }
-
-        const userUUID = uuid || getOrCreateUUID();
-        // 依照規格帶上 userId: string, text: string，並附加相容欄位
-        const payload = {
-          userId: userUUID,
-          text: trimmed,
-          originalText: trimmed,
-          uuid: userUUID,
-        };
-
-        socket.emit("submit_text", payload, (response?: { success?: boolean; message?: string; id?: string; userId?: string }) => {
-          console.log("[SocketTextSender] 伺服器確認收到:", response);
-          onSendSuccess?.({
-            userId: userUUID,
-            text: trimmed,
-            id: response?.id,
-          });
-          resolve({
-            success: true,
-            id: response?.id,
-            message: response?.message || "文字已成功加入排程佇列",
-          });
-        });
-
-        setTimeout(() => {
-          resolve({ success: true, message: "文字已送出至伺服器" });
-        }, 1200);
-      });
-    },
-    [currentUrl, onSendError, onSendSuccess, uuid]
-  );
+  }, [currentUrl, uuid]);
 
   if (!showStatusIndicator) return null;
 
@@ -283,16 +222,11 @@ export function SocketTextSender({
  */
 export function useSocketTextSender() {
   const [isConnected, setIsConnected] = useState(false);
-  const [serverUrl, setServerUrl] = useState("");
-  const [userId, setUserId] = useState("");
+  const [serverUrl] = useState(() => (typeof window !== "undefined" ? getSocketServerUrl() : ""));
+  const [userId] = useState(() => (typeof window !== "undefined" ? getOrCreateUUID() : ""));
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
 
   useEffect(() => {
-    const targetUrl = getSocketServerUrl();
-    const id = getOrCreateUUID();
-    setServerUrl(targetUrl);
-    setUserId(id);
-
     // 取得全域共享的單一 Socket 實例
     const socket = getSharedSocket();
     socketRef.current = socket;
@@ -300,7 +234,7 @@ export function useSocketTextSender() {
 
     const onConnect = () => {
       setIsConnected(true);
-      console.log(`[useSocketTextSender] 已連線至: ${targetUrl} (User ID: ${id})`);
+      console.log(`[useSocketTextSender] 已連線至: ${serverUrl} (User ID: ${userId})`);
     };
 
     const onDisconnect = () => {
@@ -314,7 +248,7 @@ export function useSocketTextSender() {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
     };
-  }, []);
+  }, [serverUrl, userId]);
 
   const sendText = useCallback(
     (textToSend: string): Promise<{ success: boolean; message: string; id?: string }> => {
