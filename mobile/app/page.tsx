@@ -8,6 +8,7 @@ import {
   TimelinePhase,
 } from "@/components/timeline/PerformanceTimeline";
 import OverlayCenterText from "@/components/ui/OverlayCenterText";
+import { useWakeLock } from "@/hooks/useWakeLock";
 
 // Dynamically load the Three.js MainCanvas component with SSR disabled
 const MainCanvas = dynamic(
@@ -84,6 +85,8 @@ class CanvasErrorBoundary extends Component<CanvasErrorBoundaryProps, CanvasErro
 
 function MobileDisplay() {
   const { currentPayload } = useSocket();
+  // 保持螢幕常亮（Screen Wake Lock API），防止展覽期間螢幕自動熄滅
+  useWakeLock();
 
   return (
     <PerformanceTimelineProvider autoReportIdle={true}>
