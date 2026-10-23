@@ -26,6 +26,30 @@ const char* SOCKET_HOST = "daf2026-env.eba-myc7zuva.us-east-1.elasticbeanstalk.c
 const int   SOCKET_PORT = 80;
 const char* SOCKET_PATH = "/socket.io/?EIO=3&transport=websocket";
 
-// 5. 硬體 Pin 腳設定
+// 5. 板載指示燈 Pin 腳設定
 const int LED_PIN = 2;                         // 板載指示燈 Pin 2 (收到本機指令時亮起 1 秒)
-const int MOTOR_PIN = 25;                      // 馬達 PWM 控制輸出腳位 (可依實際硬體接線修改)
+
+// ============================================================================
+// 🦾 步進馬達控制參數 (Stepper Motor Configuration)
+// ============================================================================
+// 6. 馬達驅動器接腳 (ENA+, DIR+, PUL+)
+const int MOTOR_ENA_PIN = 14;                  // ENA+ (致能)
+const int MOTOR_DIR_PIN = 27;                  // DIR+ (方向)
+const int MOTOR_PUL_PIN = 26;                  // PUL+ (步進脈衝)
+
+// 7. 驅動器參數 (需與驅動器撥碼開關一致)
+const long MOTOR_STEPS_PER_REV = 200;          // 1.8° 步進馬達 (每轉 200 步)
+const long MOTOR_MICROSTEP     = 32;           // 驅動器細分數
+const float STEPS_PER_DEG = (MOTOR_STEPS_PER_REV * MOTOR_MICROSTEP) / 360.0f; // ≈17.7778 步/度
+
+// 8. 動作運動學參數 (只需調整這裡)
+//    esp32-event 的 0~255 數值將 mapping 到 0.0f ~ MAX_TARGET_ANGLE_DEG
+const float MAX_TARGET_ANGLE_DEG  = 15.75f;    // 最大旋轉角度 (原 140 步 @ 16 細分，改 32 細分對應 280 步)
+const float MOTOR_MAX_SPEED_DEG_S = 13.5f;     // 最大速度 (度/秒)
+const float MOTOR_ACCEL_DEG_S2    = 4.5f;      // 加速度 (度/秒²)
+const bool  MOTOR_DIR_INVERT      = false;     // false = 順時針；true = 逆時針
+
+// 9. 時間狀態參數 (毫秒 ms)
+const unsigned long MOTOR_ENABLE_SETTLE_MS = 500;  // 上電後等待線圈穩定時間
+const unsigned long MOTOR_HOLD_MS          = 2000; // 旋轉到位後通電鎖定維持時間
+const unsigned long MOTOR_RELEASE_MS       = 5000; // 斷電釋放、彈簧回彈冷卻時間

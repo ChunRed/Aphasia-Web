@@ -11,8 +11,9 @@ bool socketConnected = false;
 unsigned long lastReconnectTime = 0;
 const unsigned long RECONNECT_INTERVAL = 3000; // 斷線後每 3 秒自動重試連線
 
-// 外部引用的 Pin 2 控制函式 (定義於 esp32-maincode.ino)
+// 外部引用的 Pin 2 與馬達控制函式
 extern void triggerPin2();
+extern void triggerMotorAction(int rawMotorValue);
 
 // 發送已遮罩 (Masked) 的 WebSocket 文字訊框 (RFC 6455 規範：客戶端發送必須遮罩)
 void sendWebSocketText(const String& msg) {
@@ -149,8 +150,9 @@ void handleEsp32Event(const String& payload) {
 
   // 比對是否為這台 ESP32 的編號
   if (targetDeviceId == MY_DEVICE_ID) {
-    Serial.printf("  ==> 【符合本台裝置 #%d】指令生效！Pin 2 亮起 1 秒\n", MY_DEVICE_ID);
+    Serial.printf("  ==> 【符合本台裝置 #%d】指令生效！Pin 2 亮起 1 秒，馬達啟動動作！\n", MY_DEVICE_ID);
     triggerPin2();
+    triggerMotorAction(motorValue);
   } else {
     Serial.printf("  ==> (指定給 #%d 號機，本機為 #%d，略過硬體動作)\n", targetDeviceId, MY_DEVICE_ID);
   }

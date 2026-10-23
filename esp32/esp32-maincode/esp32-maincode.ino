@@ -32,6 +32,8 @@ void updatePin2() {
 extern void Net_Init();        // W5500 乙太網初始化 (定義於 network.ino)
 extern void SocketIO_Init();   // Socket.IO 初始化 (定義於 socketio.ino)
 extern void SocketIO_Loop();   // Socket.IO 封包處理 (定義於 socketio.ino)
+extern void Motor_Init();      // 步進馬達初始化 (定義於 motor.ino)
+extern void Motor_Loop();      // 步進馬達狀態機迴圈 (定義於 motor.ino)
 
 void setup() {
   Serial.begin(115200);
@@ -48,14 +50,20 @@ void setup() {
   // 2. 初始化 W5500 實體有線網路模組 (自動 DHCP / 靜態備份)
   Net_Init();
 
-  // 3. 初始化 Socket.IO Client 直連 AWS Port 80 並監聽 'esp32-event'
+  // 3. 初始化步進馬達控制 (AccelStepper 驅動器模式)
+  Motor_Init();
+
+  // 4. 初始化 Socket.IO Client 直連 AWS Port 80 並監聽 'esp32-event'
   SocketIO_Init();
 }
 
 void loop() {
-  // 1. 保持 Socket.IO / WebSocket 連線與事件處理
+  // 1. 步進馬達脈衝生成與狀態機更新 (最高優先順序，持續調用 stepper.run())
+  Motor_Loop();
+
+  // 2. 保持 Socket.IO / WebSocket 連線與事件處理
   SocketIO_Loop();
 
-  // 2. 檢查 Pin 2 是否滿 1 秒需熄滅
+  // 3. 檢查 Pin 2 是否滿 1 秒需熄滅
   updatePin2();
 }
