@@ -30,7 +30,10 @@ function TimelineIndicator() {
   };
 
   return (
-    <div className="fixed top-3 left-3 z-50 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-mono bg-black/85 backdrop-blur-md text-white border border-white/20 select-none shadow pointer-events-none transition-colors duration-300">
+    <div
+      className="fixed left-3 z-50 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-mono bg-black/85 backdrop-blur-md text-white border border-white/20 select-none shadow pointer-events-none transition-colors duration-300"
+      style={{ top: "max(12px, calc(env(safe-area-inset-top, 0px) + 8px))" }}
+    >
       <span className="text-white/60">[Timer:</span>
       <span className="font-semibold text-white tracking-wide">
         {elapsedTime.toFixed(1)}s

@@ -468,7 +468,10 @@ export function SocketManager({
     <SocketContext.Provider value={contextValue}>
       {children}
       {showIndicator && (
-        <div className="fixed top-3 right-3 z-50 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono bg-black/75 backdrop-blur-md text-white border border-white/20 select-none shadow pointer-events-none">
+        <div
+          className="fixed right-3 z-50 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono bg-black/75 backdrop-blur-md text-white border border-white/20 select-none shadow pointer-events-none"
+          style={{ top: "max(12px, calc(env(safe-area-inset-top, 0px) + 8px))" }}
+        >
           <span
             className={`w-2 h-2 rounded-full ${
               !isConnected

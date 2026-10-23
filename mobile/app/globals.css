@@ -15,5 +15,8 @@ body {
   background-color: #ffffff;
   color: #000000;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
 }
