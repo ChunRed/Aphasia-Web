@@ -7,14 +7,16 @@
 
 // 1. 本台 ESP32 裝置編號 (有效範圍: 1 ~ 6)
 //    當收到 'esp32-event' 且 index1 與本編號相同時，才會觸發 Pin 2 亮燈及馬達動作
-int MY_DEVICE_ID = 1;
+//    【全自動連動】：W5500 MAC 最後一碼與固定 IP 最後一碼均會自動以此數值連動更新！
+//    例如：MY_DEVICE_ID = 3 => MAC 尾碼為 0x03，備用固定 IP 為 192.168.1.13
+int MY_DEVICE_ID = 6;
 
-// 2. W5500 實體網卡 MAC 位址
-//    注意：同一個區域網路內，每台 ESP32 的 MAC 最後一碼請勿重複 (例如 0x01 ~ 0x06)
+// 2. W5500 實體網卡 MAC 位址模板
+//    程式初始化時會自動將最後一碼替換為 (byte)MY_DEVICE_ID (例如 #3 號機即為 0x03)
 byte W5500_MAC[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0x01 };
 
 // 3. W5500 靜態備用固定 IP 設定 (當區網路由器無 DHCP 伺服器時使用)
-//    每台裝置的 IP 最後一碼建議分開 (例如 192.168.1.11 ~ 192.168.1.16)
+//    程式初始化時會自動將 IP 最後一碼設定為 (10 + MY_DEVICE_ID) (例如 #3 號機即為 192.168.1.13)
 IPAddress W5500_LOCAL_IP(192, 168, 1, 11);
 IPAddress W5500_GATEWAY(192, 168, 1, 1);
 IPAddress W5500_SUBNET(255, 255, 255, 0);
@@ -44,12 +46,12 @@ const float STEPS_PER_DEG = (MOTOR_STEPS_PER_REV * MOTOR_MICROSTEP) / 360.0f; //
 
 // 8. 動作運動學參數 (只需調整這裡)
 //    esp32-event 的 0~255 數值將 mapping 到 0.0f ~ MAX_TARGET_ANGLE_DEG
-const float MAX_TARGET_ANGLE_DEG  = 15.75f;    // 最大旋轉角度 (原 140 步 @ 16 細分，改 32 細分對應 280 步)
-const float MOTOR_MAX_SPEED_DEG_S = 13.5f;     // 最大速度 (度/秒)
-const float MOTOR_ACCEL_DEG_S2    = 4.5f;      // 加速度 (度/秒²)
+const float MAX_TARGET_ANGLE_DEG  = 20.0f;    // 最大旋轉角度 (原 140 步 @ 16 細分，改 32 細分對應 280 步)
+const float MOTOR_MAX_SPEED_DEG_S = 11.5f;     // 最大速度 (度/秒)
+const float MOTOR_ACCEL_DEG_S2    = 9.5f;      // 加速度 (度/秒²)
 const bool  MOTOR_DIR_INVERT      = false;     // false = 順時針；true = 逆時針
 
 // 9. 時間狀態參數 (毫秒 ms)
 const unsigned long MOTOR_ENABLE_SETTLE_MS = 500;  // 上電後等待線圈穩定時間
-const unsigned long MOTOR_HOLD_MS          = 2000; // 旋轉到位後通電鎖定維持時間
+const unsigned long MOTOR_HOLD_MS          = 11500; // 旋轉到位後通電鎖定維持時間
 const unsigned long MOTOR_RELEASE_MS       = 5000; // 斷電釋放、彈簧回彈冷卻時間

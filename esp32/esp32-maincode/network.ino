@@ -2,6 +2,7 @@
 #include <EthernetUdp.h>
 
 // ========== 引用於 config.ino 的硬體網路參數 ==========
+extern int MY_DEVICE_ID;
 extern byte W5500_MAC[];
 extern IPAddress W5500_LOCAL_IP;
 extern IPAddress W5500_DNS;
@@ -22,7 +23,16 @@ int slave1Digits[4] = {1, 1, 1, 1};
 int slave2Digits[4] = {1, 1, 1, 1};
 
 void Net_Init() {
+  // 依據 MY_DEVICE_ID 自動設定 MAC 與備用固定 IP 的最後一碼
+  // 例如 MY_DEVICE_ID = 3 => MAC 最後一碼自動為 0x03, 備用 IP 自動為 192.168.1.13
+  W5500_MAC[5] = (byte)MY_DEVICE_ID;
+  W5500_LOCAL_IP = IPAddress(192, 168, 1, 10 + MY_DEVICE_ID);
+
   Serial.println("[W5500] 正在初始化 W5500 乙太網模組 (CS Pin 5)...");
+  Serial.printf("[W5500] 裝置 #%d 自動配置: MAC 尾碼 0x%02X, 備用固定 IP: %d.%d.%d.%d\n",
+                MY_DEVICE_ID, W5500_MAC[5],
+                W5500_LOCAL_IP[0], W5500_LOCAL_IP[1], W5500_LOCAL_IP[2], W5500_LOCAL_IP[3]);
+
   Ethernet.init(W5500_CS);
 
   // 1. 優先嘗試透過 DHCP 自動取得 IP、Gateway 與 DNS（適合一般接上路由器的實體網路線）
