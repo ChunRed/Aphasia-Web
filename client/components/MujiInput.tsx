@@ -38,10 +38,12 @@ export default function MujiInput({
     show: boolean;
     isSuccess: boolean;
     message: string;
+    targetDeviceId?: number;
   }>({
     show: false,
     isSuccess: false,
     message: "",
+    targetDeviceId: undefined,
   });
 
   useEffect(() => {
@@ -64,6 +66,7 @@ export default function MujiInput({
       const kwList = Array.isArray(data?.keywords) ? data.keywords : [];
       const kwFormatted = kwList.join("、");
       const massText = data?.deletedMassText || "0.00 g";
+      const targetDeviceId = data?.targetDeviceId != null ? Number(data.targetDeviceId) : undefined;
       const message = kwFormatted
         ? `已完成關鍵字分析：${kwFormatted}，共計刪除 ${massText} 文字`
         : `已完成關鍵字分析，共計刪除 ${massText} 文字`;
@@ -72,20 +75,26 @@ export default function MujiInput({
         show: true,
         isSuccess: true,
         message,
+        targetDeviceId,
       });
     });
 
     // 成功通知（備援相容）：清空輸入框，顯示完成反饋，重置為 IDLE 狀態
-    const unsubscribeSuccess = onDiarySuccess((data: MessageLog & { message?: string }) => {
+    const unsubscribeSuccess = onDiarySuccess((data: MessageLog & { message?: string; targetDeviceId?: number }) => {
       console.log("[MujiInput] 收到 DIARY_SUCCESS:", data);
       setText("");
       setStatus("IDLE");
       setStatusMessage("");
 
+      const targetDeviceId = data?.targetDeviceId != null ? Number(data.targetDeviceId) : undefined;
+
       setModal((prev) => {
-        // 若已收到 ANALYSIS_RESULT 並顯示詳細文案，則保留
+        // 若已收到 ANALYSIS_RESULT 並顯示詳細文案，則保留文案，但確保 targetDeviceId 補齊
         if (prev.show && prev.message.startsWith("已完成關鍵字分析")) {
-          return prev;
+          return {
+            ...prev,
+            targetDeviceId: targetDeviceId ?? prev.targetDeviceId,
+          };
         }
 
         const kwList = Array.isArray(data?.keywords) ? data.keywords : [];
@@ -99,6 +108,7 @@ export default function MujiInput({
           show: true,
           isSuccess: true,
           message,
+          targetDeviceId,
         };
       });
     });
@@ -140,7 +150,7 @@ export default function MujiInput({
     // 1. 立即切換為 PENDING 狀態，鎖定 UI，顯示「正在進行關鍵字化...」
     setStatus("PENDING");
     setStatusMessage("正在進行關鍵字化...");
-    setModal({ show: false, isSuccess: false, message: "" });
+    setModal({ show: false, isSuccess: false, message: "", targetDeviceId: undefined });
 
     try {
       // 2. 先行通過 Cloudflare Turnstile 後端驗證
@@ -356,6 +366,28 @@ export default function MujiInput({
             <div className="text-stone-700 text-xs sm:text-sm font-extralight tracking-widest leading-loose whitespace-pre-line mb-6">
               {modal.message}
             </div>
+
+            {/* 6 裝置空間指示圖示 (由右至左對應 Device 1 ~ 6，畫面最右側為 Device 1，最左側為 Device 6) */}
+            {modal.isSuccess && (
+              <div
+                className="flex items-center justify-center gap-[9px] mb-6"
+                aria-label="Device Allocation Spatial Indicator"
+              >
+                {[6, 5, 4, 3, 2, 1].map((deviceId) => {
+                  const isTarget = modal.targetDeviceId === deviceId;
+                  return (
+                    <div
+                      key={deviceId}
+                      className={`w-[28px] h-[14px] border border-black box-border transition-all duration-300 ${
+                        isTarget
+                          ? "bg-black animate-device-breath"
+                          : "bg-transparent"
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+            )}
 
             {/* Close Button */}
             <button

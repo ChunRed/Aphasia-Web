@@ -12,6 +12,7 @@ export interface MessageLog {
   originalText: string;// 觀眾輸入的完整日記內容 (>= 10 字)
   keywords: string[];  // Gemini API 分析出的 3~5 個關鍵字
   deletedMassText?: string; // 被刪除文字之微觀質量克數字串
+  targetDeviceId?: number;  // 派發之展場目標裝置 ID (1~6)
   timestamp: number;   // 建立時間戳記
 }
 
@@ -21,6 +22,7 @@ export interface MessageLog {
 export interface AnalysisResultPayload {
   keywords: string[];        // 篩選出的關鍵字陣列
   deletedMassText: string;   // 被刪除文字之微觀質量克數字串，例如 "1.53 × 10⁻³³ g"
+  targetDeviceId?: number;   // 派發之展場目標裝置 ID (1~6)
 }
 
 /**

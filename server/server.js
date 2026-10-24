@@ -690,6 +690,70 @@ function formatDeletedMass(bits) {
 }
 
 /**
+ * 向觀眾端發送派發成功與裝置資訊 (ANALYSIS_RESULT 與 DIARY_SUCCESS)
+ * 包含 targetDeviceId: Number(targetDeviceId) (1~6)
+ */
+function sendDispatchResultToAudience(item, targetDeviceId) {
+	if (!item) return;
+
+	const numDeviceId = Number(targetDeviceId);
+
+	// 單向向該發訊觀眾的 Socket 發送 ANALYSIS_RESULT 事件（包含 targetDeviceId）
+	const analysisResultPayload = {
+		keywords: item.keywords || [],
+		deletedMassText: item.deletedMassText || '0.00 g',
+		targetDeviceId: numDeviceId,
+	};
+
+	let targetSocket = null;
+	if (item.socketId && io.sockets) {
+		if (io.sockets.connected && io.sockets.connected[item.socketId]) {
+			targetSocket = io.sockets.connected[item.socketId];
+		} else if (io.sockets.sockets) {
+			targetSocket = io.sockets.sockets.get ? io.sockets.sockets.get(item.socketId) : io.sockets.sockets[item.socketId];
+		}
+	}
+
+	if (targetSocket) {
+		targetSocket.emit('ANALYSIS_RESULT', analysisResultPayload);
+		console.log(`[Socket.IO] 單向發送 ANALYSIS_RESULT (Device: ${numDeviceId}) 至 Socket ${item.socketId}:`, analysisResultPayload);
+	} else {
+		if (item.socketId) {
+			io.to(item.socketId).emit('ANALYSIS_RESULT', analysisResultPayload);
+		}
+		if (item.userId && item.userId !== item.socketId) {
+			io.to(item.userId).emit('ANALYSIS_RESULT', analysisResultPayload);
+		}
+		console.log(`[Socket.IO] 定向發送 ANALYSIS_RESULT (Device: ${numDeviceId}) 至 Room (Socket: ${item.socketId}, User: ${item.userId}):`, analysisResultPayload);
+	}
+
+	// 精準定向通知該傳送者 Socket：DIARY_SUCCESS（包含 targetDeviceId）
+	const successPayload = {
+		id: item.id,
+		userId: item.userId,
+		originalText: item.originalText,
+		keywords: item.keywords || [],
+		deletedMassText: item.deletedMassText || '0.00 g',
+		targetDeviceId: numDeviceId,
+		timestamp: item.timestamp || Date.now(),
+		durationMs: item.durationMs || 0,
+		isFallback: Boolean(item.isFallback),
+		message: item.isFallback ? '關鍵字分析完成（備用模式）' : '關鍵字分析完成',
+	};
+
+	if (targetSocket) {
+		targetSocket.emit('DIARY_SUCCESS', successPayload);
+	} else {
+		if (item.socketId) {
+			io.to(item.socketId).emit('DIARY_SUCCESS', successPayload);
+		}
+		if (item.userId && item.userId !== item.socketId) {
+			io.to(item.userId).emit('DIARY_SUCCESS', successPayload);
+		}
+	}
+}
+
+/**
  * 核心獨佔式派發函式 (嚴格精準單發，絕不使用 io.emit 廣播展示內容)
  */
 function tryDispatchNext() {
@@ -698,6 +762,17 @@ function tryDispatchNext() {
 	while (readyMessageQueue.length > 0) {
 		const targetDevice = getNextIdleDevice();
 		if (!targetDevice) {
+			if (devicesMap.size === 0) {
+				// 本機/測試環境無任何手機連線時的相容處理：模擬派發至 Device 1，避免觀眾端無限等待
+				const fallbackItem = readyMessageQueue.shift();
+				const targetDeviceId = 1;
+				const finalKeywords = sanitizeKeywords(fallbackItem.keywords, fallbackItem.originalText);
+				const { motorValue, D } = calculateMotorDisplacement(fallbackItem.originalText, finalKeywords);
+				io.emit('esp32-event', [Number(targetDeviceId), motorValue]);
+				console.log(`[Dispatcher] (No devices connected fallback) Assigned to virtual Device 1 [Msg: ${fallbackItem.id}]`);
+				sendDispatchResultToAudience(fallbackItem, Number(targetDeviceId));
+				continue;
+			}
 			// 無任何 idle 裝置可派發，等待裝置回報 DEVICE_IDLE
 			break;
 		}
@@ -727,6 +802,14 @@ function tryDispatchNext() {
 		const busyCount = Array.from(devicesMap.values()).filter((d) => d.status === 'busy').length;
 		const totalCount = devicesMap.size;
 		console.log(`[Dispatcher] Assigned message to Device [${targetDevice.deviceUuid}] with Keywords [${payload.keywords.join(', ')}] (Busy: ${busyCount}/${totalCount}, Pending Messages: ${readyMessageQueue.length}) [Msg: ${payload.id}]`);
+
+		// 在 Dispatcher 確定將該筆日記派發給指定閒置手機（targetDeviceId，1~6）時，將 targetDeviceId 包含在送回給該觀眾的事件資料中
+		sendDispatchResultToAudience(item, Number(targetDeviceId));
+
+		const logEntry = messageLogs.find((l) => l.id === item.id);
+		if (logEntry) {
+			logEntry.targetDeviceId = Number(targetDeviceId);
+		}
 	}
 }
 
@@ -819,75 +902,33 @@ async function processQueue() {
 				messageLogs.pop();
 			}
 
-			// 存入待展示派發佇列 (readyMessageQueue)
-			readyMessageQueue.push({
-				id: processedEntry.id,
-				userId: processedEntry.userId,
-				originalText: processedEntry.originalText,
-				keywords: processedEntry.keywords,
-			});
-			console.log(`[Dispatcher] 新增項目至待派發佇列 (ID: ${processedEntry.id}, 佇列長度: ${readyMessageQueue.length})`);
-
-			// 立即嘗試進行獨佔式派發 (Round-Robin Worker Pool)
-			tryDispatchNext();
-
-			// 僅通知監控面板（絕不全域廣播 new_text 給展示端，避免污染其他裝置畫面）
-			io.emit('new_processed_entry', processedEntry);
-			io.emit('new_message_log', processedEntry);
-
 			// 計算刪除質量：統計被刪除文字的總位元數 B_deleted（以 UTF-8 位元計算：中文 24 bits、ASCII 8 bits）
 			// 換算克數：m_deleted = B_deleted × 3.19 × 10^-35 g
 			const deletedBits = calculateDeletedBits(processedEntry.originalText, processedEntry.keywords);
 			const formattedMass = formatDeletedMass(deletedBits);
 			const deletedMassText = `${formattedMass} g`;
 
-			// 單向向該發訊觀眾的 Socket 發送 ANALYSIS_RESULT 事件
-			const analysisResultPayload = {
-				keywords: processedEntry.keywords,
-				deletedMassText,
-			};
-
-			let targetSocket = null;
-			if (currentItem.socketId && io.sockets && io.sockets.connected) {
-				targetSocket = io.sockets.connected[currentItem.socketId];
-			}
-
-			if (targetSocket) {
-				targetSocket.emit('ANALYSIS_RESULT', analysisResultPayload);
-				console.log(`[Socket.IO] 單向發送 ANALYSIS_RESULT 至 Socket ${currentItem.socketId}:`, analysisResultPayload);
-			} else {
-				if (currentItem.socketId) {
-					io.to(currentItem.socketId).emit('ANALYSIS_RESULT', analysisResultPayload);
-				}
-				if (currentItem.userId && currentItem.userId !== currentItem.socketId) {
-					io.to(currentItem.userId).emit('ANALYSIS_RESULT', analysisResultPayload);
-				}
-				console.log(`[Socket.IO] 定向發送 ANALYSIS_RESULT 至 Room (Socket: ${currentItem.socketId}, User: ${currentItem.userId}):`, analysisResultPayload);
-			}
-
-			// 精準定向通知該傳送者 Socket：DIARY_SUCCESS
-			const successPayload = {
+			// 存入待展示派發佇列 (readyMessageQueue)，包含 socketId 與刪除質量資訊
+			readyMessageQueue.push({
 				id: processedEntry.id,
 				userId: processedEntry.userId,
+				socketId: currentItem.socketId,
 				originalText: processedEntry.originalText,
 				keywords: processedEntry.keywords,
 				deletedMassText,
-				timestamp: processedEntry.timestamp,
 				durationMs,
 				isFallback,
-				message: isFallback ? '關鍵字分析完成（備用模式）' : '關鍵字分析完成',
-			};
+				timestamp: processedEntry.timestamp,
+			});
+			console.log(`[Dispatcher] 新增項目至待派發佇列 (ID: ${processedEntry.id}, 佇列長度: ${readyMessageQueue.length})`);
 
-			if (targetSocket) {
-				targetSocket.emit('DIARY_SUCCESS', successPayload);
-			} else {
-				if (currentItem.socketId) {
-					io.to(currentItem.socketId).emit('DIARY_SUCCESS', successPayload);
-				}
-				if (currentItem.userId && currentItem.userId !== currentItem.socketId) {
-					io.to(currentItem.userId).emit('DIARY_SUCCESS', successPayload);
-				}
-			}
+			// 立即嘗試進行獨佔式派發 (Round-Robin Worker Pool)
+			// 若有閒置裝置（或無手機連線回退模式），tryDispatchNext 會立即派發並將 targetDeviceId 回傳給觀眾
+			tryDispatchNext();
+
+			// 僅通知監控面板（絕不全域廣播 new_text 給展示端，避免污染其他裝置畫面）
+			io.emit('new_processed_entry', processedEntry);
+			io.emit('new_message_log', processedEntry);
 		} else {
 			// --- 失敗（API 報錯、逾時或格式錯誤）：精準定向回傳 DIARY_ERROR ---
 			console.warn(`[Queue] 分析失敗: User ${currentItem.userId} (ID: ${currentItem.id})，發送 DIARY_ERROR`);

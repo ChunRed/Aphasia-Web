@@ -75,3 +75,16 @@ body {
 .animate-cursor-breath {
   animation: cursorBreath 1.6s ease-in-out infinite;
 }
+
+@keyframes deviceBreath {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-device-breath {
+  animation: deviceBreath 1.8s ease-in-out infinite;
+}
