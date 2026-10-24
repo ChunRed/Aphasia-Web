@@ -35,7 +35,7 @@ export const TEXT_NETWORK_CONFIG: FloatingTextNetworkOptions = {
   largeAmp: 8.05,
   damping: 3,
   springTension: 0.7,
-  textScale: 0.46,
+  textScale: 0.52,
   fontSize: 45,
   spreadRadius: 2.9,
   connectDistance: 2.2,
@@ -51,9 +51,9 @@ export const TEXT_NETWORK_CONFIG: FloatingTextNetworkOptions = {
 // ============================================================================
 export const CAMERA_CONFIG = {
   autoRotate: true,
-  rotateSpeed: 4.0,
+  rotateSpeed: 3.0,
   target: [0, 0, 0] as [number, number, number],
-  distance: 10.8,
+  distance: 6.5,
   elevation: 0.5,
 };
 
@@ -109,7 +109,7 @@ export default function MainCanvas({
     // 2. Camera 設定
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     const [tx, ty, tz] = CAMERA_CONFIG.target;
     camera.position.set(tx, ty + CAMERA_CONFIG.elevation, tz + CAMERA_CONFIG.distance);
     camera.lookAt(tx, ty, tz);
@@ -298,22 +298,22 @@ export default function MainCanvas({
 
       try {
         controls.dispose();
-      } catch {}
+      } catch { }
       try {
         if (postProcessing) {
           postProcessing.dispose();
         }
-      } catch {}
+      } catch { }
       try {
         floatingNetwork.dispose();
         scene.remove(floatingNetwork.group);
-      } catch {}
+      } catch { }
       try {
         renderer.dispose();
         if (renderer.domElement.parentNode) {
           renderer.domElement.parentNode.removeChild(renderer.domElement);
         }
-      } catch {}
+      } catch { }
     };
   }, [autoRotate, rotateSpeed, textNetworkConfig]);
 

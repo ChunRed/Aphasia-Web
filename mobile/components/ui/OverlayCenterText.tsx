@@ -400,9 +400,8 @@ export default function OverlayCenterText({
       <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none select-none px-4 gap-3">
         {/* 1. 黑底容器範圍收縮：只保留給訊息文字本身 */}
         <div
-          className={`max-w-[88vw] min-w-[260px] px-6 py-3.5 bg-black/85 backdrop-blur-md border rounded-sm shadow-2xl transition-all duration-300 flex items-center justify-center text-center ${
-            isGlitchActive ? "animate-mutation-glitch border-white/80" : "border-white/20"
-          }`}
+          className={`max-w-[88vw] min-w-[260px] px-6 py-3.5 bg-black/85 backdrop-blur-md border rounded-sm shadow-2xl transition-all duration-300 flex items-center justify-center text-center ${isGlitchActive ? "animate-mutation-glitch border-white/80" : "border-white/20"
+            }`}
           style={{
             backdropFilter: "blur(14px)",
             WebkitBackdropFilter: "blur(14px)",
@@ -419,7 +418,7 @@ export default function OverlayCenterText({
 
         {/* 2. 數據列移至黑底之外：置於黑色訊息卡片正下方，置中純黑字，無任何背景底色或邊框，徹底移除冗餘前綴標籤 */}
         <div className="w-full text-center select-none pt-1">
-          <div className="inline-block font-mono text-xs sm:text-sm tracking-[0.25em] text-black font-semibold tabular-nums">
+          <div className="inline-block font-semibold text-base sm:text-lg tracking-[0.25em] text-black font-semibold tabular-nums">
             {phase === TimelinePhase.PHASE_1_ACCUMULATE || phase === TimelinePhase.PHASE_2_RUPTURE ? (
               <span>{currentBits.toLocaleString()} bits</span>
             ) : (

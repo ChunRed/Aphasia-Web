@@ -56,7 +56,7 @@ export function createTextSprite(
     fontWeight = 400,
     scale = 0.16,
     subText,
-    subTextRatio = 0.46,
+    subTextRatio = 0.38,
     subTextColor,
   } = options;
 
@@ -68,7 +68,7 @@ export function createTextSprite(
       sprite: dummySprite,
       texture: new THREE.Texture(),
       material: dummyMat,
-      dispose: () => {},
+      dispose: () => { },
     };
   }
 
@@ -84,7 +84,7 @@ export function createTextSprite(
   const subFontSize = Math.round(scaledFontSize * subTextRatio);
 
   const mainFontSpec = `${fontWeight} ${scaledFontSize}px ${fontFamily}`;
-  const subFontSpec = `400 ${subFontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
+  const subFontSpec = `600 ${subFontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
 
   ctx.font = mainFontSpec;
   const mainMetrics = ctx.measureText(text);

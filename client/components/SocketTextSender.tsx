@@ -11,7 +11,16 @@ export interface MessageLog {
   userId: string;      // 傳送者的 UUID
   originalText: string;// 觀眾輸入的完整日記內容 (>= 10 字)
   keywords: string[];  // Gemini API 分析出的 3~5 個關鍵字
+  deletedMassText?: string; // 被刪除文字之微觀質量克數字串
   timestamp: number;   // 建立時間戳記
+}
+
+/**
+ * 分析結果資料結構規格 (AnalysisResultPayload)
+ */
+export interface AnalysisResultPayload {
+  keywords: string[];        // 篩選出的關鍵字陣列
+  deletedMassText: string;   // 被刪除文字之微觀質量克數字串，例如 "1.53 × 10⁻³³ g"
 }
 
 /**
@@ -347,6 +356,15 @@ export function useSocketTextSender() {
     [serverUrl, userId]
   );
 
+  // 監聽特定使用者的 ANALYSIS_RESULT 通知
+  const onAnalysisResult = useCallback((callback: (data: AnalysisResultPayload) => void) => {
+    const socket = socketRef.current || getSharedSocket();
+    socket.on("ANALYSIS_RESULT", callback);
+    return () => {
+      socket.off("ANALYSIS_RESULT", callback);
+    };
+  }, []);
+
   // 監聽特定使用者的 DIARY_SUCCESS 通知
   const onDiarySuccess = useCallback((callback: (data: MessageLog & { message?: string }) => void) => {
     const socket = socketRef.current || getSharedSocket();
@@ -372,6 +390,7 @@ export function useSocketTextSender() {
     submitDiary,
     onDiarySuccess,
     onDiaryError,
+    onAnalysisResult,
     userId,
     userUUID: userId,
   };

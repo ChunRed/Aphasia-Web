@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Turnstile } from "@marsstrikes/react-turnstile";
 import ScrambleText from "@/components/ScrambleText";
-import { useSocketTextSender, MessageLog } from "@/components/SocketTextSender";
+import { useSocketTextSender, MessageLog, AnalysisResultPayload } from "@/components/SocketTextSender";
 
 interface MujiInputProps {
   isVisible?: boolean;
@@ -26,6 +26,7 @@ export default function MujiInput({
     submitDiary,
     onDiarySuccess,
     onDiaryError,
+    onAnalysisResult,
     serverUrl: socketServerUrl,
   } = useSocketTextSender();
 
@@ -51,19 +52,54 @@ export default function MujiInput({
 
   const activeToken = propToken || token;
 
-  // 監聽來自 Server 的精準定向通知 (DIARY_SUCCESS 與 DIARY_ERROR)
+  // 監聽來自 Server 的精準定向通知 (ANALYSIS_RESULT、DIARY_SUCCESS 與 DIARY_ERROR)
   useEffect(() => {
-    // 成功通知：清空輸入框，顯示完成反饋，重置為 IDLE 狀態
+    // 監聽 ANALYSIS_RESULT 事件：顯示篩選出的關鍵字與被刪除微觀質量克數
+    const unsubscribeAnalysis = onAnalysisResult((data: AnalysisResultPayload) => {
+      console.log("[MujiInput] 收到 ANALYSIS_RESULT:", data);
+      setText("");
+      setStatus("IDLE");
+      setStatusMessage("");
+
+      const kwList = Array.isArray(data?.keywords) ? data.keywords : [];
+      const kwFormatted = kwList.join("、");
+      const massText = data?.deletedMassText || "0.00 g";
+      const message = kwFormatted
+        ? `已完成關鍵字分析：${kwFormatted}，共計刪除 ${massText} 文字`
+        : `已完成關鍵字分析，共計刪除 ${massText} 文字`;
+
+      setModal({
+        show: true,
+        isSuccess: true,
+        message,
+      });
+    });
+
+    // 成功通知（備援相容）：清空輸入框，顯示完成反饋，重置為 IDLE 狀態
     const unsubscribeSuccess = onDiarySuccess((data: MessageLog & { message?: string }) => {
       console.log("[MujiInput] 收到 DIARY_SUCCESS:", data);
       setText("");
       setStatus("IDLE");
       setStatusMessage("");
 
-      setModal({
-        show: true,
-        isSuccess: true,
-        message: "已完成關鍵字化",
+      setModal((prev) => {
+        // 若已收到 ANALYSIS_RESULT 並顯示詳細文案，則保留
+        if (prev.show && prev.message.startsWith("已完成關鍵字分析")) {
+          return prev;
+        }
+
+        const kwList = Array.isArray(data?.keywords) ? data.keywords : [];
+        const kwFormatted = kwList.join("、");
+        const massText = data?.deletedMassText;
+        const message = (kwFormatted && massText)
+          ? `已完成關鍵字分析：${kwFormatted}，共計刪除 ${massText} 文字`
+          : (kwFormatted ? `已完成關鍵字分析：${kwFormatted}` : "已完成關鍵字分析");
+
+        return {
+          show: true,
+          isSuccess: true,
+          message,
+        };
       });
     });
 
@@ -75,10 +111,11 @@ export default function MujiInput({
     });
 
     return () => {
+      unsubscribeAnalysis();
       unsubscribeSuccess();
       unsubscribeError();
     };
-  }, [onDiarySuccess, onDiaryError]);
+  }, [onAnalysisResult, onDiarySuccess, onDiaryError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,6 +140,7 @@ export default function MujiInput({
     // 1. 立即切換為 PENDING 狀態，鎖定 UI，顯示「正在進行關鍵字化...」
     setStatus("PENDING");
     setStatusMessage("正在進行關鍵字化...");
+    setModal({ show: false, isSuccess: false, message: "" });
 
     try {
       // 2. 先行通過 Cloudflare Turnstile 後端驗證

@@ -314,9 +314,23 @@ function sanitizeKeywords(rawKeywords, originalText) {
 	return sanitized.slice(0, 3);
 }
 
-// 輔助函式：呼叫 Gemini API 分析文字（安全極簡呼叫，支援短暫尖峰重試）
-const GEMINI_TIMEOUT_MS = 7000; // 7 秒逾時（Gemini 3.1 Flash-Lite 正常回傳約 1 秒，逾時則快速切換以避免觀眾枯等）
+// 輔助函式：呼叫 Gemini API 分析文字（安全極簡呼叫，單次嘗試保護免費配額）
+const THROTTLE_INTERVAL_MS = 5000; // 嚴格 5 秒呼叫間隔規範 (Throttling，確保 RPM <= 12 < 15)
+const GEMINI_TIMEOUT_MS = 9000; // 9 秒逾時保護
+let lastGeminiRequestTimestamp = 0; // 記錄前一次實際發送 Gemini 請求的時間戳
+
 async function callGeminiSingle(text, config) {
+	const now = Date.now();
+	const deltaMs = lastGeminiRequestTimestamp > 0 ? now - lastGeminiRequestTimestamp : null;
+	lastGeminiRequestTimestamp = now;
+	const timestampIso = new Date(now).toISOString();
+
+	console.log(
+		`[Gemini Request] [${timestampIso}] 發送 API 請求 (距上次呼叫: ${
+			deltaMs !== null ? `${deltaMs}ms` : '首筆呼叫'
+		}, 間隔 >= 5000ms: ${deltaMs === null || deltaMs >= THROTTLE_INTERVAL_MS})`
+	);
+
 	const timeoutPromise = new Promise((_, reject) =>
 		setTimeout(() => reject(new Error('Gemini API 請求逾時')), GEMINI_TIMEOUT_MS)
 	);
@@ -342,18 +356,8 @@ async function analyzeWithGemini(text) {
 	}
 
 	try {
-		let response = null;
-		for (let attempt = 1; attempt <= 2; attempt++) {
-			try {
-				response = await callGeminiSingle(text, geminiConfig);
-				break;
-			} catch (err) {
-				console.error(`[Gemini] 第 ${attempt} 次呼叫失敗. Error Detail:`, err?.message || err);
-				if (attempt < 2) {
-					await new Promise((r) => setTimeout(r, 800)); // 縮短重試間隔為 800ms
-				}
-			}
-		}
+		// 每次任務僅發送 1 次請求，保護免費配額（絕不重試，防止額外消耗與漫長等待）
+		const response = await callGeminiSingle(text, geminiConfig);
 
 		const durationMs = Date.now() - startTime;
 		let keywords = [];
@@ -401,8 +405,9 @@ async function analyzeWithGemini(text) {
 		console.log(`[Gemini] 解析成功並完成清洗 (${durationMs}ms): [${cleanKw.join(', ')}]`);
 		return { keywords: cleanKw, isFallback: false, durationMs };
 	} catch (err) {
+		// 若 API 逾時、連線異常或配額限制，立即啟動本地保底，絕不重試乾等！
 		const durationMs = Date.now() - startTime;
-		console.error(`[Gemini] 分析過程發生例外 (${durationMs}ms). Error Detail:`, err);
+		console.warn(`[Gemini] API 請求未完成 (${durationMs}ms)，立即啟動本地保底機制. Detail:`, err?.message || err);
 		const fallbackKw = extractFallbackKeywords(text);
 		return { keywords: sanitizeKeywords(fallbackKw, text), isFallback: true, durationMs };
 	}
@@ -420,7 +425,6 @@ const io = socketIo(server, {
 // 5. 待處理佇列 (Queue) 與 記憶體儲存 (Recent 20 Logs - FIFO)
 const pendingQueue = [];
 let isQueueProcessing = false;
-const THROTTLE_INTERVAL_MS = 5000; // 5 秒頻率限制 (Throttling)
 
 /**
  * 記憶體中儲存的 20 筆記錄 (MessageLog 格式)
@@ -586,6 +590,106 @@ function calculateMotorDisplacement(originalText, keywords) {
 }
 
 /**
+ * 展場天平與資訊微觀質量物理常數與計算工具
+ * 物理常數：1 bit = 3.19 × 10⁻³⁸ kg = 3.19 × 10⁻³⁵ g
+ */
+const BIT_TO_GRAM_CONSTANT = 3.19e-35;
+
+const SUPERSCRIPT_MAP = {
+	'-': '⁻',
+	'+': '⁺',
+	'0': '⁰',
+	'1': '¹',
+	'2': '²',
+	'3': '³',
+	'4': '⁴',
+	'5': '⁵',
+	'6': '⁶',
+	'7': '⁷',
+	'8': '⁸',
+	'9': '⁹',
+};
+
+function toSuperscript(num) {
+	return String(num)
+		.split('')
+		.map((ch) => SUPERSCRIPT_MAP[ch] || ch)
+		.join('');
+}
+
+/**
+ * 計算字串所佔位元數 (bits)
+ * 規格：以 UTF-8 位元計算：中文 24 bits、ASCII 8 bits
+ */
+function calculateTextBits(text) {
+	if (!text || typeof text !== 'string') return 0;
+	if (typeof Buffer !== 'undefined' && typeof Buffer.byteLength === 'function') {
+		return Buffer.byteLength(text, 'utf8') * 8;
+	}
+	let bytes = 0;
+	for (let i = 0; i < text.length; i++) {
+		const code = text.charCodeAt(i);
+		if (code <= 0x7f) {
+			bytes += 1;
+		} else if (code <= 0x7ff) {
+			bytes += 2;
+		} else if (code <= 0xffff) {
+			bytes += 3;
+		} else {
+			bytes += 4;
+		}
+	}
+	return bytes * 8;
+}
+
+/**
+ * 統計被刪除文字的總位元數 B_deleted
+ * 從原文中移除篩選出的關鍵字後，統計剩餘被刪除文字的總位元數
+ */
+function calculateDeletedBits(originalText, keywords) {
+	if (!originalText || typeof originalText !== 'string') return 0;
+	const kwList = Array.isArray(keywords) ? keywords : [];
+
+	let remainingText = originalText;
+	let allFound = true;
+	for (const kw of kwList) {
+		if (typeof kw === 'string' && kw.length > 0) {
+			const idx = remainingText.indexOf(kw);
+			if (idx !== -1) {
+				remainingText = remainingText.slice(0, idx) + remainingText.slice(idx + kw.length);
+			} else {
+				allFound = false;
+			}
+		}
+	}
+
+	if (allFound) {
+		return calculateTextBits(remainingText);
+	}
+
+	const totalBits = calculateTextBits(originalText);
+	const kwBits = kwList.reduce((sum, kw) => sum + calculateTextBits(kw), 0);
+	return Math.max(0, totalBits - kwBits);
+}
+
+/**
+ * 換算克數：m_deleted = B_deleted × 3.19 × 10^-35 g
+ * 保留兩位小數與標準科學記號格式（例如 "1.53 × 10⁻³³"）
+ */
+function formatDeletedMass(bits) {
+	if (!bits || isNaN(bits) || bits <= 0) {
+		return '0.00';
+	}
+	const massGrams = bits * BIT_TO_GRAM_CONSTANT;
+	const expStr = massGrams.toExponential(2);
+	const parts = expStr.split('e');
+	const mantissa = parts[0] || '0.00';
+	const exponent = parseInt(parts[1] || '0', 10);
+	const expUnicode = toSuperscript(exponent);
+	return `${mantissa} × 10${expUnicode}`;
+}
+
+/**
  * 核心獨佔式派發函式 (嚴格精準單發，絕不使用 io.emit 廣播展示內容)
  */
 function tryDispatchNext() {
@@ -672,108 +776,147 @@ async function processQueue() {
 
 	console.log(`[Queue] 取出訊息進行分析 (ID: ${currentItem.id}, User: ${currentItem.userId}, Socket: ${currentItem.socketId}, 剩餘待處理: ${pendingQueue.length})`);
 
-	let analysisResult = null;
-
 	try {
-		analysisResult = await analyzeWithGemini(currentItem.originalText);
-	} catch (err) {
-		console.error(`[Queue] 處理項目 ${currentItem.id} 時發生例外. Error Detail:`, err);
-		analysisResult = { keywords: extractFallbackKeywords(currentItem.originalText), isFallback: true, durationMs: 0 };
+		let analysisResult = null;
+
+		try {
+			analysisResult = await analyzeWithGemini(currentItem.originalText);
+		} catch (err) {
+			console.error(`[Queue] 處理項目 ${currentItem.id} 時發生例外. Error Detail:`, err);
+			analysisResult = { keywords: extractFallbackKeywords(currentItem.originalText), isFallback: true, durationMs: 0 };
+		}
+
+		const cleanKeywords = sanitizeKeywords(analysisResult?.keywords, currentItem.originalText);
+		const isFallback = Boolean(analysisResult?.isFallback);
+		const durationMs = typeof analysisResult?.durationMs === 'number' ? analysisResult.durationMs : 0;
+
+		if (cleanKeywords && cleanKeywords.length > 0) {
+			// --- 成功：組裝標準 MessageLog 並存入記憶體 ---
+			const processedEntry = {
+				id: currentItem.id,
+				userId: currentItem.userId,
+				originalText: currentItem.originalText,
+				keywords: cleanKeywords,
+				timestamp: Date.now(),
+				durationMs,
+				isFallback,
+				// 向下相容欄位
+				uuid: currentItem.userId,
+				text: currentItem.originalText,
+				status: isFallback ? 'fallback' : 'success',
+			};
+
+			console.log(`[Queue] 分析成功 (${durationMs}ms, ${isFallback ? 'Fallback' : 'AI OK'}): User ${processedEntry.userId} -> [${processedEntry.keywords.join(', ')}]`);
+
+			// 本地日誌非同步追加寫入（Append-only Log 永久存檔備份，獨立 try/catch，絕不阻塞主流程與派發）
+			appendMessageArchive(processedEntry).catch((err) => {
+				console.error('[ArchiveLog] 非同步寫入發生未預期錯誤:', err);
+			});
+
+			// 存入記憶體陣列（維護最新 20 則，超過則先進先出 FIFO）
+			messageLogs.unshift(processedEntry);
+			if (messageLogs.length > MAX_LOGS) {
+				messageLogs.pop();
+			}
+
+			// 存入待展示派發佇列 (readyMessageQueue)
+			readyMessageQueue.push({
+				id: processedEntry.id,
+				userId: processedEntry.userId,
+				originalText: processedEntry.originalText,
+				keywords: processedEntry.keywords,
+			});
+			console.log(`[Dispatcher] 新增項目至待派發佇列 (ID: ${processedEntry.id}, 佇列長度: ${readyMessageQueue.length})`);
+
+			// 立即嘗試進行獨佔式派發 (Round-Robin Worker Pool)
+			tryDispatchNext();
+
+			// 僅通知監控面板（絕不全域廣播 new_text 給展示端，避免污染其他裝置畫面）
+			io.emit('new_processed_entry', processedEntry);
+			io.emit('new_message_log', processedEntry);
+
+			// 計算刪除質量：統計被刪除文字的總位元數 B_deleted（以 UTF-8 位元計算：中文 24 bits、ASCII 8 bits）
+			// 換算克數：m_deleted = B_deleted × 3.19 × 10^-35 g
+			const deletedBits = calculateDeletedBits(processedEntry.originalText, processedEntry.keywords);
+			const formattedMass = formatDeletedMass(deletedBits);
+			const deletedMassText = `${formattedMass} g`;
+
+			// 單向向該發訊觀眾的 Socket 發送 ANALYSIS_RESULT 事件
+			const analysisResultPayload = {
+				keywords: processedEntry.keywords,
+				deletedMassText,
+			};
+
+			let targetSocket = null;
+			if (currentItem.socketId && io.sockets && io.sockets.connected) {
+				targetSocket = io.sockets.connected[currentItem.socketId];
+			}
+
+			if (targetSocket) {
+				targetSocket.emit('ANALYSIS_RESULT', analysisResultPayload);
+				console.log(`[Socket.IO] 單向發送 ANALYSIS_RESULT 至 Socket ${currentItem.socketId}:`, analysisResultPayload);
+			} else {
+				if (currentItem.socketId) {
+					io.to(currentItem.socketId).emit('ANALYSIS_RESULT', analysisResultPayload);
+				}
+				if (currentItem.userId && currentItem.userId !== currentItem.socketId) {
+					io.to(currentItem.userId).emit('ANALYSIS_RESULT', analysisResultPayload);
+				}
+				console.log(`[Socket.IO] 定向發送 ANALYSIS_RESULT 至 Room (Socket: ${currentItem.socketId}, User: ${currentItem.userId}):`, analysisResultPayload);
+			}
+
+			// 精準定向通知該傳送者 Socket：DIARY_SUCCESS
+			const successPayload = {
+				id: processedEntry.id,
+				userId: processedEntry.userId,
+				originalText: processedEntry.originalText,
+				keywords: processedEntry.keywords,
+				deletedMassText,
+				timestamp: processedEntry.timestamp,
+				durationMs,
+				isFallback,
+				message: isFallback ? '關鍵字分析完成（備用模式）' : '關鍵字分析完成',
+			};
+
+			if (targetSocket) {
+				targetSocket.emit('DIARY_SUCCESS', successPayload);
+			} else {
+				if (currentItem.socketId) {
+					io.to(currentItem.socketId).emit('DIARY_SUCCESS', successPayload);
+				}
+				if (currentItem.userId && currentItem.userId !== currentItem.socketId) {
+					io.to(currentItem.userId).emit('DIARY_SUCCESS', successPayload);
+				}
+			}
+		} else {
+			// --- 失敗（API 報錯、逾時或格式錯誤）：精準定向回傳 DIARY_ERROR ---
+			console.warn(`[Queue] 分析失敗: User ${currentItem.userId} (ID: ${currentItem.id})，發送 DIARY_ERROR`);
+
+			const errorPayload = {
+				id: currentItem.id,
+				userId: currentItem.userId,
+				message: '分析失敗，請再次輸入',
+				code: 'ANALYSIS_FAILED',
+				error: 'Gemini API 處理逾時或回傳格式不正確',
+			};
+
+			if (currentItem.socketId) {
+				io.to(currentItem.socketId).emit('DIARY_ERROR', errorPayload);
+			}
+			if (currentItem.userId) {
+				io.to(currentItem.userId).emit('DIARY_ERROR', errorPayload);
+			}
+		}
+	} catch (unhandledQueueErr) {
+		console.error(`[Queue] 佇列處理項目 ${currentItem.id} 時發生未預期例外:`, unhandledQueueErr);
+	} finally {
+		// 遞迴延遲 5 秒後進行下一筆處理，確保前一次完成後再計算間隔
+		setTimeout(() => {
+			isQueueProcessing = false;
+			broadcastQueueStatus();
+			processQueue();
+		}, THROTTLE_INTERVAL_MS);
 	}
-
-	const cleanKeywords = sanitizeKeywords(analysisResult?.keywords, currentItem.originalText);
-	const isFallback = Boolean(analysisResult?.isFallback);
-	const durationMs = typeof analysisResult?.durationMs === 'number' ? analysisResult.durationMs : 0;
-
-	if (cleanKeywords && cleanKeywords.length > 0) {
-		// --- 成功：組裝標準 MessageLog 並存入記憶體 ---
-		const processedEntry = {
-			id: currentItem.id,
-			userId: currentItem.userId,
-			originalText: currentItem.originalText,
-			keywords: cleanKeywords,
-			timestamp: Date.now(),
-			durationMs,
-			isFallback,
-			// 向下相容欄位
-			uuid: currentItem.userId,
-			text: currentItem.originalText,
-			status: isFallback ? 'fallback' : 'success',
-		};
-
-		console.log(`[Queue] 分析成功 (${durationMs}ms, ${isFallback ? 'Fallback' : 'AI OK'}): User ${processedEntry.userId} -> [${processedEntry.keywords.join(', ')}]`);
-
-		// 本地日誌非同步追加寫入（Append-only Log 永久存檔備份，獨立 try/catch，絕不阻塞主流程與派發）
-		appendMessageArchive(processedEntry).catch((err) => {
-			console.error('[ArchiveLog] 非同步寫入發生未預期錯誤:', err);
-		});
-
-		// 存入記憶體陣列（維護最新 20 則，超過則先進先出 FIFO）
-		messageLogs.unshift(processedEntry);
-		if (messageLogs.length > MAX_LOGS) {
-			messageLogs.pop();
-		}
-
-		// 存入待展示派發佇列 (readyMessageQueue)
-		readyMessageQueue.push({
-			id: processedEntry.id,
-			userId: processedEntry.userId,
-			originalText: processedEntry.originalText,
-			keywords: processedEntry.keywords,
-		});
-		console.log(`[Dispatcher] 新增項目至待派發佇列 (ID: ${processedEntry.id}, 佇列長度: ${readyMessageQueue.length})`);
-
-		// 立即嘗試進行獨佔式派發 (Round-Robin Worker Pool)
-		tryDispatchNext();
-
-		// 僅通知監控面板（絕不全域廣播 new_text 給展示端，避免污染其他裝置畫面）
-		io.emit('new_processed_entry', processedEntry);
-		io.emit('new_message_log', processedEntry);
-
-		// 精準定向通知該傳送者 Socket：DIARY_SUCCESS
-		const successPayload = {
-			id: processedEntry.id,
-			userId: processedEntry.userId,
-			originalText: processedEntry.originalText,
-			keywords: processedEntry.keywords,
-			timestamp: processedEntry.timestamp,
-			durationMs,
-			isFallback,
-			message: isFallback ? '關鍵字分析完成（備用模式）' : '關鍵字分析完成',
-		};
-
-		if (currentItem.socketId) {
-			io.to(currentItem.socketId).emit('DIARY_SUCCESS', successPayload);
-		}
-		if (currentItem.userId) {
-			io.to(currentItem.userId).emit('DIARY_SUCCESS', successPayload);
-		}
-	} else {
-		// --- 失敗（API 報錯、逾時或格式錯誤）：精準定向回傳 DIARY_ERROR ---
-		console.warn(`[Queue] 分析失敗: User ${currentItem.userId} (ID: ${currentItem.id})，發送 DIARY_ERROR`);
-
-		const errorPayload = {
-			id: currentItem.id,
-			userId: currentItem.userId,
-			message: '分析失敗，請再次輸入',
-			code: 'ANALYSIS_FAILED',
-			error: 'Gemini API 處理逾時或回傳格式不正確',
-		};
-
-		if (currentItem.socketId) {
-			io.to(currentItem.socketId).emit('DIARY_ERROR', errorPayload);
-		}
-		if (currentItem.userId) {
-			io.to(currentItem.userId).emit('DIARY_ERROR', errorPayload);
-		}
-	}
-
-	// 遞迴延遲 5 秒後進行下一筆處理，確保前一次完成後再計算間隔
-	setTimeout(() => {
-		isQueueProcessing = false;
-		broadcastQueueStatus();
-		processQueue();
-	}, THROTTLE_INTERVAL_MS);
 }
 
 // 7. Socket.IO 連線事件處理
