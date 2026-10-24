@@ -48,6 +48,42 @@ export const SEED_PRESETS: SeedPreset[] = [
     originalText: "人工智慧時代，那些漂亮的文字噼哩啪啦的不斷落下、快速堆疊出超乎自己能力的優美字詞。",
     keywords: ["人工智慧", "文字", "能力", "優美"],
   },
+  {
+    id: "seed-7",
+    userId: "system-seed-7",
+    originalText: "還好最近沒有惡夢，只有夢到一些莫名其妙的動物，站起來的狗、高速移動的鷸、趴在肩膀上的鴨子",
+    keywords: ["惡夢", "動物", "夢到"],
+  },
+  {
+    id: "seed-8",
+    userId: "system-seed-8",
+    originalText: "外面的雷停不下來，可是一次又一次照亮天空的閃電好像讓人稍微平靜一些。",
+    keywords: ["平靜", "閃電", "天空"],
+  },
+  {
+    id: "seed-9",
+    userId: "system-seed-9",
+    originalText: "好像很久沒有像這樣打點什麼無關緊要的事當作日記，可能是因為隔了六個小時候又會再跟自己見面，好像沒有什麼值得寫下來的",
+    keywords: ["日記", "值得", "見面"],
+  },
+  {
+    id: "seed-10",
+    userId: "system-seed-10",
+    originalText: "成為自己的心中的小天才，是一種偉大的夢想吧。",
+    keywords: ["夢想", "偉大", "天才", "心中"],
+  },
+  {
+    id: "seed-11",
+    userId: "system-seed-11",
+    originalText: "我一直以為失去某個人的消息是因為他現在過得很幸福，一直以為這是一種告訴彼此我很好的默契。",
+    keywords: ["幸福", "默契", "失去", "消息"],
+  },
+  {
+    id: "seed-12",
+    userId: "system-seed-12",
+    originalText: "一年中總有某幾天特別想跟人聊天，想告訴別人自己的事，而其他日子，這些故事都說不出口。",
+    keywords: ["聊天", "故事", "日子"],
+  },
 ];
 
 /**

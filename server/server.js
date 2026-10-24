@@ -500,6 +500,66 @@ const SEED_PRESETS = [
 		text: '人工智慧時代，那些漂亮的文字噼哩啪啦的不斷落下、快速堆疊出超乎自己能力的優美字詞。',
 		status: 'success',
 	},
+	{
+		id: 'seed-7',
+		userId: 'system-seed-7',
+		originalText: '還好最近沒有惡夢，只有夢到一些莫名其妙的動物，站起來的狗、高速移動的鷸、趴在肩膀上的鴨子',
+		keywords: ['惡夢', '動物', '夢到'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-7',
+		text: '還好最近沒有惡夢，只有夢到一些莫名其妙的動物，站起來的狗、高速移動的鷸、趴在肩膀上的鴨子',
+		status: 'success',
+	},
+	{
+		id: 'seed-8',
+		userId: 'system-seed-8',
+		originalText: '外面的雷停不下來，可是一次又一次照亮天空的閃電好像讓人稍微平靜一些。',
+		keywords: ['平靜', '閃電', '天空'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-8',
+		text: '外面的雷停不下來，可是一次又一次照亮天空的閃電好像讓人稍微平靜一些。',
+		status: 'success',
+	},
+	{
+		id: 'seed-9',
+		userId: 'system-seed-9',
+		originalText: '好像很久沒有像這樣打點什麼無關緊要的事當作日記，可能是因為隔了六個小時候又會再跟自己見面，好像沒有什麼值得寫下來的',
+		keywords: ['日記', '值得', '見面'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-9',
+		text: '好像很久沒有像這樣打點什麼無關緊要的事當作日記，可能是因為隔了六個小時候又會再跟自己見面，好像沒有什麼值得寫下來的',
+		status: 'success',
+	},
+	{
+		id: 'seed-10',
+		userId: 'system-seed-10',
+		originalText: '成為自己的心中的小天才，是一種偉大的夢想吧。',
+		keywords: ['夢想', '偉大', '天才', '心中'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-10',
+		text: '成為自己的心中的小天才，是一種偉大的夢想吧。',
+		status: 'success',
+	},
+	{
+		id: 'seed-11',
+		userId: 'system-seed-11',
+		originalText: '我一直以為失去某個人的消息是因為他現在過得很幸福，一直以為這是一種告訴彼此我很好的默契。',
+		keywords: ['幸福', '默契', '失去', '消息'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-11',
+		text: '我一直以為失去某個人的消息是因為他現在過得很幸福，一直以為這是一種告訴彼此我很好的默契。',
+		status: 'success',
+	},
+	{
+		id: 'seed-12',
+		userId: 'system-seed-12',
+		originalText: '一年中總有某幾天特別想跟人聊天，想告訴別人自己的事，而其他日子，這些故事都說不出口。',
+		keywords: ['聊天', '故事', '日子'],
+		timestamp: Date.now(),
+		uuid: 'system-seed-12',
+		text: '一年中總有某幾天特別想跟人聊天，想告訴別人自己的事，而其他日子，這些故事都說不出口。',
+		status: 'success',
+	},
 ];
 
 const messageLogs = [...SEED_PRESETS];
@@ -813,6 +873,101 @@ function tryDispatchNext() {
 	}
 }
 
+// ============================================================================
+// 5.2 展場無人閒置自主派發機制 (Idle Timer Auto-Play)
+// 當系統連續 120 秒未收到任何觀眾輸入且有至少一台裝置處於 idle 時，
+// 自主挑選預設日記派發演出，並驅動 ESP32 實體天平。
+// ============================================================================
+const IDLE_TIMEOUT_SECONDS = parseInt(process.env.IDLE_TIMEOUT_SECONDS || process.env.IDLE_TIMEOUT, 10) || 120;
+const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_SECONDS * 1000;
+let idleTimer = null;
+let lastAudienceSubmissionAt = Date.now();
+
+/**
+ * 閒置計時器逾時自主觸發函式
+ */
+function triggerIdleAutoplay() {
+	// 若有真實觀眾佇列正在等待，觀眾優先，不進行自主派發
+	if (pendingQueue.length > 0 || readyMessageQueue.length > 0) {
+		console.log('[IdleTimer] 佇列中尚有觀眾訊息等待處理，自主派發暫緩');
+		resetIdleTimer();
+		return;
+	}
+
+	// 檢查距上次觀眾輸入是否確實滿 120 秒
+	const elapsedSinceSubmission = Date.now() - lastAudienceSubmissionAt;
+	if (elapsedSinceSubmission < IDLE_TIMEOUT_MS) {
+		const remaining = IDLE_TIMEOUT_MS - elapsedSinceSubmission;
+		clearTimeout(idleTimer);
+		idleTimer = setTimeout(triggerIdleAutoplay, remaining);
+		return;
+	}
+
+	// 檢查是否有至少一台處於 idle 狀態的裝置
+	const targetDevice = getNextIdleDevice();
+	if (!targetDevice) {
+		console.log(`[IdleTimer] 閒置逾時 (${IDLE_TIMEOUT_SECONDS}s)，但當前無閒置裝置，將於 10 秒後再次檢查`);
+		clearTimeout(idleTimer);
+		idleTimer = setTimeout(triggerIdleAutoplay, 10000);
+		return;
+	}
+
+	// 1. 從擴充後的 12 組預設種子資料（SEED_PRESETS）隨機抽取一筆
+	const randomPreset = SEED_PRESETS[Math.floor(Math.random() * SEED_PRESETS.length)];
+	const targetDeviceId = targetDevice.deviceUuid;
+	const finalKeywords = sanitizeKeywords(randomPreset.keywords, randomPreset.originalText);
+	const entryId = generateMessageId();
+
+	const payload = {
+		id: entryId,
+		userId: `system-idle-${targetDeviceId}`,
+		originalText: randomPreset.originalText,
+		keywords: finalKeywords,
+	};
+
+	// 2. 標記該裝置為 busy 並更新派發時間戳記 (Least-Recently-Assigned)
+	targetDevice.status = 'busy';
+	targetDevice.lastAssignedAt = Date.now();
+
+	// 3. 手機端同步：向該裝置發送 DISPATCH_PAYLOAD，正常啟動 25 秒演出狀態機
+	io.to(targetDevice.socketId).emit('DISPATCH_PAYLOAD', payload);
+
+	// 4. 硬體端同步：依照該預設文字的刪除字數公式算出 motorValue（100~255），向全體廣播 esp32-event，驅動對應實體天平下沉
+	const { motorValue, D } = calculateMotorDisplacement(payload.originalText, payload.keywords);
+	io.emit('esp32-event', [Number(targetDeviceId), motorValue]);
+	console.log(`[IoT] (Idle AutoPlay) Broadcast esp32-event -> Device ${targetDeviceId}, Deleted: ${D}, MotorValue: ${motorValue}`);
+
+	const busyCount = Array.from(devicesMap.values()).filter((d) => d.status === 'busy').length;
+	const totalCount = devicesMap.size;
+	console.log(`[Idle Dispatcher] Assigned random preset [${randomPreset.id}] to Device [${targetDeviceId}] with Keywords [${payload.keywords.join(', ')}] (Busy: ${busyCount}/${totalCount}) [Msg: ${entryId}]`);
+
+	// 通知監控面板
+	io.emit('new_processed_entry', {
+		...payload,
+		timestamp: Date.now(),
+		durationMs: 0,
+		isFallback: false,
+		status: 'idle_autoplay',
+		targetDeviceId: Number(targetDeviceId),
+	});
+
+	// 5. 派發完成後，重新啟動下一輪 120 秒閒置計時
+	resetIdleTimer();
+}
+
+/**
+ * 重設閒置計時器（凡有真實觀眾送出日記，或自主派發完成後皆調用）
+ */
+function resetIdleTimer() {
+	if (idleTimer) {
+		clearTimeout(idleTimer);
+		idleTimer = null;
+	}
+	lastAudienceSubmissionAt = Date.now();
+	idleTimer = setTimeout(triggerIdleAutoplay, IDLE_TIMEOUT_MS);
+	console.log(`[IdleTimer] 計時器已重設（閒置閾值: ${IDLE_TIMEOUT_SECONDS}s）`);
+}
+
 // 計算當前真實線上使用者人數（排除 monitor 監控頁面，按 userId / UUID 去重）
 const getOnlineUserCount = () => {
 	const userUuids = new Set();
@@ -1013,6 +1168,9 @@ io.on('connection', (socket) => {
 
 	// 通用處理函式：接收日記文字並入列
 	const handleDiarySubmission = (data, callback) => {
+		// 優先處理真實觀眾輸入：立即清除並重設 120 秒閒置計時器
+		resetIdleTimer();
+
 		// 1. 取得 userId：優先取 payload 的 userId / uuid，若無則 fallback 到 socket 綁定值，最外層補上伺服器端自動生成 UUID
 		const userId =
 			(data && (data.userId || data.uuid)) ||
@@ -1096,6 +1254,9 @@ io.on('connection', (socket) => {
 
 		if (devStatus === 'idle') {
 			tryDispatchNext();
+			if (readyMessageQueue.length === 0 && pendingQueue.length === 0 && Date.now() - lastAudienceSubmissionAt >= IDLE_TIMEOUT_MS) {
+				triggerIdleAutoplay();
+			}
 		}
 	});
 
@@ -1139,6 +1300,9 @@ io.on('connection', (socket) => {
 		console.log(`[Dispatcher] Device [${devUuid}] reported IDLE (Busy: ${busyCount}/${totalCount}, Pending Messages: ${readyMessageQueue.length})`);
 
 		tryDispatchNext();
+		if (readyMessageQueue.length === 0 && pendingQueue.length === 0 && Date.now() - lastAudienceSubmissionAt >= IDLE_TIMEOUT_MS) {
+			triggerIdleAutoplay();
+		}
 	});
 
 	// 相容一般 message 事件
@@ -1215,8 +1379,12 @@ server.listen(PORT, '0.0.0.0', () => {
 	console.log(`[Server] Aphasia Server running on http://localhost:${PORT}`);
 	console.log(`[Config] Gemini Model: ${GEMINI_MODEL}`);
 	console.log(`[Queue] Queue Throttling: 1 request / ${THROTTLE_INTERVAL_MS / 1000}s`);
+	console.log(`[IdleTimer] Auto-Play Idle Threshold: ${IDLE_TIMEOUT_SECONDS}s`);
 	console.log(`[ArchiveLog] Append-only Log: ${ARCHIVE_FILE}`);
 	console.log(`===============================================`);
+
+	// 啟動首輪 120 秒閒置計時器
+	resetIdleTimer();
 });
 
 module.exports = {
