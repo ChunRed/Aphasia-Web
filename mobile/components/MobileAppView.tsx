@@ -19,10 +19,18 @@ const MainCanvas = dynamic(
 );
 
 /**
+ * 暫時性 Debug 驗證指示器開關
+ * 💡 若之後想重新開啟，只需將 false 改為 true 即可！
+ */
+const SHOW_TIMELINE_DEBUG_INDICATOR = false;
+
+/**
  * 暫時性 Debug 驗證指示器
  * 顯示格式：[Timer: 12.4s | PHASE_2_RUPTURE]
  */
 function TimelineIndicator() {
+  if (!SHOW_TIMELINE_DEBUG_INDICATOR) return null;
+
   const { phase, elapsedTime, cycleIndex } = usePerformanceTimeline();
 
   const phaseColors: Record<TimelinePhase, string> = {
