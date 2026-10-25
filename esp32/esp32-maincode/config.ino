@@ -9,7 +9,7 @@
 //    當收到 'esp32-event' 且 index1 與本編號相同時，才會觸發 Pin 2 亮燈及馬達動作
 //    【全自動連動】：W5500 MAC 最後一碼與固定 IP 最後一碼均會自動以此數值連動更新！
 //    例如：MY_DEVICE_ID = 3 => MAC 尾碼為 0x03，備用固定 IP 為 192.168.1.13
-int MY_DEVICE_ID = 6;
+int MY_DEVICE_ID = 1;
 
 // 2. W5500 實體網卡 MAC 位址模板
 //    程式初始化時會自動將最後一碼替換為 (byte)MY_DEVICE_ID (例如 #3 號機即為 0x03)
@@ -53,5 +53,5 @@ const bool  MOTOR_DIR_INVERT      = false;     // false = 順時針；true = 逆
 
 // 9. 時間狀態參數 (毫秒 ms)
 const unsigned long MOTOR_ENABLE_SETTLE_MS = 500;  // 上電後等待線圈穩定時間
-const unsigned long MOTOR_HOLD_MS          = 11500; // 旋轉到位後通電鎖定維持時間
+const unsigned long MOTOR_HOLD_MS          = 9500; // 旋轉到位後通電鎖定維持時間
 const unsigned long MOTOR_RELEASE_MS       = 5000; // 斷電釋放、彈簧回彈冷卻時間

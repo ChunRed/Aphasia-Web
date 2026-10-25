@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Turnstile } from "@marsstrikes/react-turnstile";
 import ScrambleText from "@/components/ScrambleText";
+import RedactedText from "@/components/RedactedText";
 import { useSocketTextSender, MessageLog, AnalysisResultPayload } from "@/components/SocketTextSender";
 
 interface MujiInputProps {
@@ -17,6 +18,86 @@ interface MujiInputProps {
  * - ERROR: 分析失敗，解鎖輸入框與按鈕，保留原內容以供重新送出
  */
 export type InputStatus = "IDLE" | "PENDING" | "ERROR";
+
+/**
+ * 將使用者輸入的文字根據後端回傳的關鍵字進行切分，
+ * 關鍵字保持露出，非關鍵字文字包裝在 RedactedText 黑色長方形色塊中展開。
+ */
+function renderRedactedInput(rawText: string, keywords: string[], trigger: boolean) {
+  if (!rawText) return null;
+  if (!keywords || keywords.length === 0) {
+    return <span className="text-stone-800">{rawText}</span>;
+  }
+
+  const validKeywords = keywords
+    .map((k) => (typeof k === "string" ? k.trim() : ""))
+    .filter((k) => k.length > 0);
+
+  if (validKeywords.length === 0) {
+    return <span className="text-stone-800">{rawText}</span>;
+  }
+
+  // 建立比對關鍵字的正規表達式（忽略大小寫）
+  const pattern = new RegExp(
+    `(${validKeywords.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
+    "gi"
+  );
+
+  const tokens = rawText.split(pattern);
+  let animIndex = 0;
+
+  return tokens.map((token, idx) => {
+    if (!token) return null;
+
+    const isKw = validKeywords.some(
+      (kw) => kw.toLowerCase() === token.toLowerCase()
+    );
+
+    if (isKw) {
+      return (
+        <span
+          key={`kw-${idx}`}
+          className="text-stone-900 font-normal m-0 p-0"
+        >
+          {token}
+        </span>
+      );
+    }
+
+    // 將非關鍵字切分成 6~10 字元的區塊，確保換行時色塊如海報般俐落排列
+    const subChunks: string[] = [];
+    let remaining = token;
+    while (remaining.length > 0) {
+      if (remaining.length <= 10) {
+        subChunks.push(remaining);
+        break;
+      }
+      const punctMatch = remaining.slice(4, 12).search(/[，,。！？；;\s\n]/);
+      const sliceLen = punctMatch !== -1 ? 4 + punctMatch + 1 : 8;
+      subChunks.push(remaining.slice(0, sliceLen));
+      remaining = remaining.slice(sliceLen);
+    }
+
+    return (
+      <React.Fragment key={`non-kw-${idx}`}>
+        {subChunks.map((sub, sIdx) => {
+          const delay = 0.05 + animIndex * 0.08;
+          animIndex++;
+          return (
+            <RedactedText
+              key={`sub-${idx}-${sIdx}`}
+              trigger={trigger}
+              delay={delay}
+              duration={0.85}
+            >
+              {sub}
+            </RedactedText>
+          );
+        })}
+      </React.Fragment>
+    );
+  });
+}
 
 export default function MujiInput({
   isVisible = true,
@@ -33,6 +114,15 @@ export default function MujiInput({
   const [status, setStatus] = useState<InputStatus>("IDLE");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [text, setText] = useState("");
+  const [submittedText, setSubmittedText] = useState("");
+  const [returnedKeywords, setReturnedKeywords] = useState<string[]>([]);
+  const [isRedactingInput, setIsRedactingInput] = useState(false);
+  const [redactCountdown, setRedactCountdown] = useState(5);
+
+  const isRedactingRef = useRef(false);
+  const redactionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   const [token, setToken] = useState(propToken);
   const [modal, setModal] = useState<{
     show: boolean;
@@ -47,6 +137,13 @@ export default function MujiInput({
   });
 
   useEffect(() => {
+    return () => {
+      if (redactionTimerRef.current) clearTimeout(redactionTimerRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     if (propToken) {
       setToken(propToken);
     }
@@ -54,22 +151,50 @@ export default function MujiInput({
 
   const activeToken = propToken || token;
 
-  // 監聽來自 Server 的精準定向通知 (ANALYSIS_RESULT、DIARY_SUCCESS 與 DIARY_ERROR)
-  useEffect(() => {
-    // 監聽 ANALYSIS_RESULT 事件：顯示篩選出的關鍵字與被刪除微觀質量克數
-    const unsubscribeAnalysis = onAnalysisResult((data: AnalysisResultPayload) => {
-      console.log("[MujiInput] 收到 ANALYSIS_RESULT:", data);
+  // 統一啟動 5 秒倒數與文字抹除流程
+  const triggerRedactionSequence = (data: {
+    keywords?: string[];
+    deletedMassText?: string;
+    targetDeviceId?: number;
+  }) => {
+    if (isRedactingRef.current) return;
+    isRedactingRef.current = true;
+
+    const kwList = Array.isArray(data?.keywords) ? data.keywords : [];
+    const kwFormatted = kwList.join("、");
+    const massText = data?.deletedMassText || "0.00 g";
+    const targetDeviceId = data?.targetDeviceId != null ? Number(data.targetDeviceId) : undefined;
+    const message = kwFormatted
+      ? `已完成關鍵字分析：${kwFormatted}，共計刪除 ${massText} 文字`
+      : `已完成關鍵字分析，共計刪除 ${massText} 文字`;
+
+    // 1. 收到關鍵字，啟動文字抹除動畫（保留關鍵字，遮蔽其餘文字）
+    setReturnedKeywords(kwList);
+    setIsRedactingInput(true);
+    setRedactCountdown(5);
+    setStatusMessage("正在抹除無關緊要文字...");
+
+    // 2. 5 秒倒數計時器
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    countdownIntervalRef.current = setInterval(() => {
+      setRedactCountdown((prev) => {
+        if (prev <= 1) {
+          if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // 3. 5 秒倒數完畢後，清空輸入框，彈出分析結果彈窗
+    redactionTimerRef.current = setTimeout(() => {
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      setIsRedactingInput(false);
+      isRedactingRef.current = false;
       setText("");
+      setSubmittedText("");
       setStatus("IDLE");
       setStatusMessage("");
-
-      const kwList = Array.isArray(data?.keywords) ? data.keywords : [];
-      const kwFormatted = kwList.join("、");
-      const massText = data?.deletedMassText || "0.00 g";
-      const targetDeviceId = data?.targetDeviceId != null ? Number(data.targetDeviceId) : undefined;
-      const message = kwFormatted
-        ? `已完成關鍵字分析：${kwFormatted}，共計刪除 ${massText} 文字`
-        : `已完成關鍵字分析，共計刪除 ${massText} 文字`;
 
       setModal({
         show: true,
@@ -77,45 +202,30 @@ export default function MujiInput({
         message,
         targetDeviceId,
       });
+    }, 5000);
+  };
+
+  // 監聽來自 Server 的精準定向通知 (ANALYSIS_RESULT、DIARY_SUCCESS 與 DIARY_ERROR)
+  useEffect(() => {
+    // 監聽 ANALYSIS_RESULT 事件：後端回傳關鍵字與刪除質量
+    const unsubscribeAnalysis = onAnalysisResult((data: AnalysisResultPayload) => {
+      console.log("[MujiInput] 收到 ANALYSIS_RESULT:", data);
+      triggerRedactionSequence(data);
     });
 
-    // 成功通知（備援相容）：清空輸入框，顯示完成反饋，重置為 IDLE 狀態
+    // 成功通知（備援相容）
     const unsubscribeSuccess = onDiarySuccess((data: MessageLog & { message?: string; targetDeviceId?: number }) => {
       console.log("[MujiInput] 收到 DIARY_SUCCESS:", data);
-      setText("");
-      setStatus("IDLE");
-      setStatusMessage("");
-
-      const targetDeviceId = data?.targetDeviceId != null ? Number(data.targetDeviceId) : undefined;
-
-      setModal((prev) => {
-        // 若已收到 ANALYSIS_RESULT 並顯示詳細文案，則保留文案，但確保 targetDeviceId 補齊
-        if (prev.show && prev.message.startsWith("已完成關鍵字分析")) {
-          return {
-            ...prev,
-            targetDeviceId: targetDeviceId ?? prev.targetDeviceId,
-          };
-        }
-
-        const kwList = Array.isArray(data?.keywords) ? data.keywords : [];
-        const kwFormatted = kwList.join("、");
-        const massText = data?.deletedMassText;
-        const message = (kwFormatted && massText)
-          ? `已完成關鍵字分析：${kwFormatted}，共計刪除 ${massText} 文字`
-          : (kwFormatted ? `已完成關鍵字分析：${kwFormatted}` : "已完成關鍵字分析");
-
-        return {
-          show: true,
-          isSuccess: true,
-          message,
-          targetDeviceId,
-        };
-      });
+      triggerRedactionSequence(data);
     });
 
-    // 失敗通知：切換為 ERROR 狀態，解除鎖定，提示「分析失敗，請再次輸入」，保留原輸入文字！
+    // 失敗通知：切換為 ERROR 狀態，解除鎖定，提示「分析失敗，請再次輸入」，保留原輸入文字
     const unsubscribeError = onDiaryError((err: { message: string; code?: string }) => {
       console.warn("[MujiInput] 收到 DIARY_ERROR:", err);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      if (redactionTimerRef.current) clearTimeout(redactionTimerRef.current);
+      setIsRedactingInput(false);
+      isRedactingRef.current = false;
       setStatus("ERROR");
       setStatusMessage(err.message || "分析失敗，請再次輸入");
     });
@@ -130,8 +240,8 @@ export default function MujiInput({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // PENDING 狀態嚴禁重複送出
-    if (status === "PENDING") return;
+    // PENDING 或正在遮蔽時嚴禁重複送出
+    if (status === "PENDING" || isRedactingInput) return;
 
     const length = text.trim().length;
 
@@ -147,7 +257,8 @@ export default function MujiInput({
       return;
     }
 
-    // 1. 立即切換為 PENDING 狀態，鎖定 UI，顯示「正在進行關鍵字化...」
+    // 1. 立即記錄送出文字並切換為 PENDING 狀態，鎖定 UI
+    setSubmittedText(text.trim());
     setStatus("PENDING");
     setStatusMessage("正在進行關鍵字化...");
     setModal({ show: false, isSuccess: false, message: "", targetDeviceId: undefined });
@@ -176,7 +287,6 @@ export default function MujiInput({
       // 3. 通過後透過 Socket.IO 發送 SUBMIT_DIARY 事件至伺服器排程佇列
       await submitDiary(text.trim());
       console.log(`[MujiInput] 日記已送至 Server 佇列，等待分析完成 (${socketServerUrl})`);
-      // 保持 PENDING 狀態，等待 Server 經由 Socket 回傳 DIARY_SUCCESS 或 DIARY_ERROR
     } catch (error) {
       console.error("Submit error:", error);
       setStatus("ERROR");
@@ -190,10 +300,10 @@ export default function MujiInput({
 
   return (
     <>
+
       <div
-        className={`w-full max-w-sm mx-auto mt-6 ${
-          isVisible ? "animate-fade-in-delayed" : "opacity-0 pointer-events-none"
-        }`}
+        className={`w-full max-w-sm mx-auto mt-6 relative z-10 ${isVisible ? "animate-fade-in-delayed" : "opacity-0 pointer-events-none"
+          }`}
       >
         <form id="muji-form" onSubmit={handleSubmit} className="flex flex-col gap-6">
           <div className="flex flex-col gap-2">
@@ -205,15 +315,15 @@ export default function MujiInput({
                 delay={750}
                 duration={1000}
               />
-              {isPending && (
+              {(isPending || isRedactingInput) && (
                 <span className="text-amber-600 font-mono text-[10px] tracking-wider animate-pulse">
-                  [排隊分析中]
+                  {isRedactingInput ? `[文字抹除中 ${redactCountdown}s]` : "[排隊分析中]"}
                 </span>
               )}
             </div>
 
             <div className="relative w-full">
-              {/* Textarea: PENDING 時 disabled 鎖定 */}
+              {/* Textarea: PENDING 時 disabled 鎖定，遮蔽時隱藏由下方視覺層呈現 */}
               <textarea
                 value={text}
                 onChange={(e) => {
@@ -223,18 +333,28 @@ export default function MujiInput({
                     setStatusMessage("");
                   }
                 }}
-                disabled={isPending}
+                disabled={isPending || isRedactingInput}
                 maxLength={250}
                 rows={6}
-                className={`w-full px-0 py-2 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-stone-800 text-2xl md:text-xl tracking-widest leading-relaxed resize-none transition-all duration-300 font-light ${
-                  isPending
-                    ? "opacity-50 cursor-not-allowed select-none"
-                    : "opacity-100"
-                }`}
+                className={`w-full px-0 py-2 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-stone-800 text-2xl md:text-xl tracking-widest leading-relaxed resize-none transition-all duration-300 font-light ${isRedactingInput
+                    ? "opacity-0 pointer-events-none"
+                    : isPending
+                      ? "opacity-50 cursor-not-allowed select-none"
+                      : "opacity-100"
+                  }`}
               />
 
+              {/* 關鍵字回傳後的文字遮蔽動畫視覺鏡像層 */}
+              {isRedactingInput && (
+                <div
+                  className="absolute inset-0 px-0 py-2 text-stone-800 text-2xl md:text-xl tracking-widest leading-relaxed font-light text-left overflow-hidden pointer-events-none break-words whitespace-pre-wrap select-none"
+                >
+                  {renderRedactedInput(submittedText || text, returnedKeywords, true)}
+                </div>
+              )}
+
               {/* Custom breathing cursor '|' when empty and idle */}
-              {text === "" && !isPending && (
+              {text === "" && !isPending && !isRedactingInput && (
                 <div className="absolute top-2 left-0 text-stone-400 select-none pointer-events-none text-2xl md:text-xl font-light animate-cursor-breath">
                   |
                 </div>
@@ -244,7 +364,17 @@ export default function MujiInput({
               <div className="flex items-center justify-between pt-1 border-t border-stone-200/40">
                 {/* 狀態提示文字區域 */}
                 <div className="text-left flex-1 pr-2">
-                  {isPending && (
+                  {isRedactingInput && (
+                    <div className="flex items-center gap-2 text-stone-700 text-xs tracking-wider font-mono animate-pulse">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-stone-700 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-stone-900"></span>
+                      </span>
+                      <span>關鍵字分析完成，正在抹除其餘文字... [{redactCountdown}s]</span>
+                    </div>
+                  )}
+
+                  {!isRedactingInput && isPending && (
                     <div className="flex items-center gap-2 text-stone-600 text-xs tracking-wider font-mono animate-pulse">
                       <span className="relative flex h-2 w-2">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
@@ -277,9 +407,8 @@ export default function MujiInput({
 
       {/* Submit Button Container */}
       <div
-        className={`fixed bottom-12 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-sm flex flex-col items-center gap-3 z-20 transition-all duration-300 ${
-          isVisible ? "animate-fade-in-delayed" : "opacity-0 pointer-events-none"
-        }`}
+        className={`fixed bottom-12 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-sm flex flex-col items-center gap-3 z-20 transition-all duration-300 ${isVisible ? "animate-fade-in-delayed" : "opacity-0 pointer-events-none"
+          }`}
       >
         {/* Optional fallback turnstile if no token passed */}
         {!activeToken && (
@@ -297,20 +426,23 @@ export default function MujiInput({
           </div>
         )}
 
-        {/* Submit Button: PENDING 時 disabled 鎖定 */}
+        {/* Submit Button: PENDING 或正在遮蔽時 disabled 鎖定 */}
         <button
           type="submit"
           form="muji-form"
-          disabled={!activeToken || isPending || !isValidLength}
-          className={`w-full py-3 font-light tracking-[0.3em] text-xs transition-all duration-300 focus:outline-none ${
-            !activeToken || isPending || !isValidLength
+          disabled={!activeToken || isPending || isRedactingInput || !isValidLength}
+          className={`w-full py-3 font-light tracking-[0.3em] text-xs transition-all duration-300 focus:outline-none ${!activeToken || isPending || isRedactingInput || !isValidLength
               ? "bg-stone-300 text-stone-500 opacity-60 cursor-not-allowed"
               : isError
-              ? "bg-stone-900 text-amber-200 hover:bg-stone-800 cursor-pointer shadow-md"
-              : "bg-stone-800 text-stone-100 hover:bg-stone-700 cursor-pointer shadow-md"
-          }`}
+                ? "bg-stone-900 text-amber-200 hover:bg-stone-800 cursor-pointer shadow-md"
+                : "bg-stone-800 text-stone-100 hover:bg-stone-700 cursor-pointer shadow-md"
+            }`}
         >
-          {isPending ? (
+          {isRedactingInput ? (
+            <div className="flex items-center justify-center gap-2.5 text-stone-500 font-mono tracking-[0.25em] text-xs">
+              <span>冗餘文字抹除中 [{redactCountdown}s]</span>
+            </div>
+          ) : isPending ? (
             <div className="flex items-center justify-center gap-2.5 text-stone-600 font-mono tracking-[0.25em] text-xs">
               <svg
                 className="animate-spin h-3.5 w-3.5 text-stone-500"
@@ -349,7 +481,7 @@ export default function MujiInput({
         </button>
       </div>
 
-      {/* Muji Style Modal Overlay (成功完成反饋彈窗) */}
+      {/* Muji Style Modal Overlay (成功完成反饋彈窗 - 遮蔽完 5 秒後顯示) */}
       {modal.show && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 select-none">
           <div className="bg-[#fafaf9] border border-stone-200 p-8 max-w-xs w-full text-center relative shadow-lg animate-fade-in">
@@ -378,11 +510,10 @@ export default function MujiInput({
                   return (
                     <div
                       key={deviceId}
-                      className={`w-[28px] h-[14px] border border-black box-border transition-all duration-300 ${
-                        isTarget
+                      className={`w-[28px] h-[14px] border border-black box-border transition-all duration-300 ${isTarget
                           ? "bg-black animate-device-breath"
                           : "bg-transparent"
-                      }`}
+                        }`}
                     />
                   );
                 })}

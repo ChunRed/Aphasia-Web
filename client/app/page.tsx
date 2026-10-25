@@ -5,7 +5,6 @@ import MujiInput from "@/components/MujiInput";
 import IntroModal from "@/components/IntroModal";
 import GateModal from "@/components/GateModal";
 import ScrambleText from "@/components/ScrambleText";
-import { BackgroundWordCloud } from "@/components/word-cloud";
 import SocketTextSender from "@/components/SocketTextSender";
 
 export default function Home() {
@@ -31,8 +30,6 @@ export default function Home() {
       {/* Socket.IO Connection & Status Badge (開發環境預設顯示) */}
       <SocketTextSender showStatusIndicator={process.env.NODE_ENV === "development"} />
 
-      {/* 0. Synchronized Background Word Cloud (Only mounts & animates after IntroModal is confirmed) */}
-      <BackgroundWordCloud visible={hasEntered} />
 
       {/* Subtle background radial pattern for light mode */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.02)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-[1]" />
