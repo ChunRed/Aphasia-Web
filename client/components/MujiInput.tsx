@@ -165,8 +165,8 @@ export default function MujiInput({
     const massText = data?.deletedMassText || "0.00 g";
     const targetDeviceId = data?.targetDeviceId != null ? Number(data.targetDeviceId) : undefined;
     const message = kwFormatted
-      ? `已完成關鍵字分析：${kwFormatted}，共計刪除 ${massText} 文字`
-      : `已完成關鍵字分析，共計刪除 ${massText} 文字`;
+      ? `已完成關鍵字分析：${kwFormatted}\n共計刪除 ${massText} 文字`
+      : `已完成關鍵字分析\n共計刪除 ${massText} 文字`;
 
     // 1. 收到關鍵字，啟動文字抹除動畫（保留關鍵字，遮蔽其餘文字）
     setReturnedKeywords(kwList);
@@ -484,7 +484,7 @@ export default function MujiInput({
       {/* Muji Style Modal Overlay (成功完成反饋彈窗 - 遮蔽完 5 秒後顯示) */}
       {modal.show && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 select-none">
-          <div className="bg-[#fafaf9] border border-stone-200 p-8 max-w-xs w-full text-center relative shadow-lg animate-fade-in">
+          <div className="bg-[#fafaf9] border border-stone-200 p-6 sm:p-8 max-w-md w-full text-center relative shadow-lg animate-fade-in">
             {/* Minimal Icon Indicator */}
             <div className="mb-4">
               {modal.isSuccess ? (
@@ -499,24 +499,43 @@ export default function MujiInput({
               {modal.message}
             </div>
 
-            {/* 6 裝置空間指示圖示 (由右至左對應 Device 1 ~ 6，畫面最右側為 Device 1，最左側為 Device 6) */}
+            {/* 6 裝置空間指示圖示 (由左至右為裝置 6、5、4、3、2、1，最右側為裝置 1，最左側為裝置 6) */}
             {modal.isSuccess && (
-              <div
-                className="flex items-center justify-center gap-[9px] mb-6"
-                aria-label="Device Allocation Spatial Indicator"
-              >
-                {[6, 5, 4, 3, 2, 1].map((deviceId) => {
-                  const isTarget = modal.targetDeviceId === deviceId;
-                  return (
-                    <div
-                      key={deviceId}
-                      className={`w-[28px] h-[14px] border border-black box-border transition-all duration-300 ${isTarget
-                          ? "bg-black animate-device-breath"
-                          : "bg-transparent"
+              <div className="mb-6 w-full">
+                <div className="text-[10px] text-stone-400 tracking-[0.25em] font-mono mb-3">
+                  連動展場裝置
+                </div>
+                <div
+                  className="grid grid-cols-6 gap-1.5 sm:gap-2 items-end justify-center w-full"
+                  aria-label="Device Allocation Spatial Indicator"
+                >
+                  {[6, 5, 4, 3, 2, 1].map((deviceId) => {
+                    const isTarget = modal.targetDeviceId === deviceId;
+                    return (
+                      <div
+                        key={deviceId}
+                        className={`flex flex-col items-center justify-between p-1 sm:p-1.5 rounded-[2px] transition-all duration-300 ${isTarget
+                          ? "border border-stone-900 shadow-sm animate-device-breath"
+                          : "border border-transparent"
                         }`}
-                    />
-                  );
-                })}
+                      >
+                        {/* 實體裝置圖示 (installation-icon) */}
+                        <div className="w-full flex items-center justify-center min-h-[28px] sm:min-h-[32px]">
+                          <img
+                            src="/installation-icon.png"
+                            alt={`裝置 ${deviceId}`}
+                            className="w-full max-w-[42px] h-auto object-contain opacity-100"
+                          />
+                        </div>
+
+                        {/* 裝置編號標示 */}
+                        <span className="text-[9px] sm:text-[10px] tracking-wider mt-1.5 whitespace-nowrap font-mono text-stone-900 font-normal">
+                          裝置 {deviceId}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

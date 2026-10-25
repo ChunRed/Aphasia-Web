@@ -56,14 +56,13 @@ export default function IntroModal({ isOpen, onClose, onStartExperience }: Intro
         setIsClosing(false);
         setIsRedacting(false);
       }, 500);
-    }, 6200);
+    }, 3000);
   };
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 select-none transition-opacity duration-500 ease-out ${
-        isClosing ? "opacity-0 pointer-events-none" : "opacity-100 animate-fade-in"
-      }`}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 select-none transition-opacity duration-500 ease-out ${isClosing ? "opacity-0 pointer-events-none" : "opacity-100 animate-fade-in"
+        }`}
     >
       <div className="bg-[#fafaf9] border border-stone-200 p-8 max-w-md w-full text-center relative shadow-lg overflow-hidden">
         {/* Title */}
@@ -89,14 +88,13 @@ export default function IntroModal({ isOpen, onClose, onStartExperience }: Intro
           type="button"
           onClick={handleConfirm}
           disabled={isRedacting || isClosing}
-          className={`w-full py-3 text-xs tracking-[0.3em] font-light transition-all duration-300 relative overflow-hidden focus:outline-none ${
-            isRedacting
-              ? "bg-stone-900 text-stone-300 cursor-default"
-              : "bg-stone-800 hover:bg-stone-700 text-stone-100 cursor-pointer"
-          }`}
+          className={`w-full py-3 text-xs tracking-[0.3em] font-light transition-all duration-300 relative overflow-hidden focus:outline-none ${isRedacting
+            ? "bg-stone-900 text-stone-300 cursor-default"
+            : "bg-stone-800 hover:bg-stone-700 text-stone-100 cursor-pointer"
+            }`}
         >
           {/* Progress bar line while redacting */}
-          {isRedacting && (
+          {/* {isRedacting && (
             <span
               className="absolute inset-0 bg-stone-700/60 pointer-events-none"
               style={{
@@ -104,13 +102,12 @@ export default function IntroModal({ isOpen, onClose, onStartExperience }: Intro
                 transformOrigin: "left center",
               }}
             />
-          )}
+          )} */}
 
           <span className="relative z-10 font-mono">
             {isRedacting ? (
               <span className="flex items-center justify-center gap-2">
                 <span>冗餘字詞抹除中</span>
-                <span className="text-[10px] opacity-70">[{countdown}s]</span>
               </span>
             ) : (
               <ScrambleText text="進入系統 / ENTER" trigger={isOpen} delay={300} duration={800} />

@@ -5,6 +5,7 @@ import MujiInput from "@/components/MujiInput";
 import IntroModal from "@/components/IntroModal";
 import GateModal from "@/components/GateModal";
 import ScrambleText from "@/components/ScrambleText";
+import RedactedTitle from "@/components/RedactedTitle";
 import SocketTextSender from "@/components/SocketTextSender";
 
 export default function Home() {
@@ -52,15 +53,7 @@ export default function Home() {
                 className={`text-xl sm:text-2xl md:text-3xl font-extralight tracking-[0.4em] leading-[2.2] text-stone-800 drop-shadow-sm select-text ${hasEntered ? "animate-fade-in" : "opacity-0"
                   }`}
               >
-                <ScrambleText
-                  text="那些文字已經無關緊要了"
-                  trigger={hasEntered}
-                  delay={200}
-                  duration={1200}
-                  periodicGlitch={true}
-                  glitchIntervalMin={2000}
-                  glitchIntervalMax={4500}
-                />
+                <RedactedTitle trigger={hasEntered} />
               </h1>
               <div
                 className={`h-[1px] bg-stone-300 mt-1 ${hasEntered ? "animate-width-expand" : "w-0 opacity-0"
