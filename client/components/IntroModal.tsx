@@ -56,7 +56,7 @@ export default function IntroModal({ isOpen, onClose, onStartExperience }: Intro
         setIsClosing(false);
         setIsRedacting(false);
       }, 500);
-    }, 3000);
+    }, 8000);
   };
 
   return (
@@ -67,7 +67,7 @@ export default function IntroModal({ isOpen, onClose, onStartExperience }: Intro
       <div className="bg-[#fafaf9] border border-stone-200 p-8 max-w-md w-full text-center relative shadow-lg overflow-hidden">
         {/* Title */}
         <h2 className="text-stone-800 text-sm sm:text-base font-normal tracking-[0.25em] mb-6">
-          <RedactedText trigger={isRedacting} delay={1.1} duration={0.85}>
+          <RedactedText trigger={isRedacting} delay={1.3} duration={0.75}>
             <ScrambleText text="互動說明" trigger={isOpen} delay={150} duration={1000} />
           </RedactedText>
         </h2>
@@ -75,11 +75,11 @@ export default function IntroModal({ isOpen, onClose, onStartExperience }: Intro
         {/* Concept and Instructions - Zero layout shift guaranteed, no scrollbars */}
         <div className="text-stone-600 text-xs sm:text-sm font-light tracking-widest leading-relaxed text-left space-y-4 mb-8 overflow-hidden select-none">
           <p className="m-0 p-0">
-            <RedactedText trigger={isRedacting} delay={0.05} duration={0.85}>全世界</RedactedText><span className="text-stone-900 font-normal m-0 p-0">每天</span><RedactedText trigger={isRedacting} delay={0.12} duration={0.85}>產生約 </RedactedText><span className="text-stone-900 font-normal m-0 p-0">3.5 億</span><RedactedText trigger={isRedacting} delay={0.18} duration={0.85}> Terabytes 的資訊，</RedactedText><RedactedText trigger={isRedacting} delay={0.25} duration={0.85}>同等物質質量約為 </RedactedText><RedactedText trigger={isRedacting} delay={0.32} duration={0.85}><span className="font-mono">8.93 × 10<sup>-14</sup></span> 公克，</RedactedText><RedactedText trigger={isRedacting} delay={0.4} duration={0.85}>平均生成 </RedactedText><span className="text-stone-900 font-normal m-0 p-0 font-mono">1 bit</span><RedactedText trigger={isRedacting} delay={0.48} duration={0.85}> 資訊僅需約 0.02 秒的時間。</RedactedText><RedactedText trigger={isRedacting} delay={0.56} duration={0.85}>在龐大的數據中，純粹用於表達</RedactedText><span className="text-stone-900 font-normal m-0 p-0">主觀情感</span><RedactedText trigger={isRedacting} delay={0.64} duration={0.85}>的字詞經判定不具備流通效益，</RedactedText><RedactedText trigger={isRedacting} delay={0.72} duration={0.85}>屬於系統內的無效冗餘。</RedactedText>
+            <RedactedText trigger={isRedacting} delay={0.04} duration={0.75}>全世界每天產生約 </RedactedText><RedactedText trigger={isRedacting} delay={0.1} duration={0.75}>3.5 億位元資訊，</RedactedText><RedactedText trigger={isRedacting} delay={0.16} duration={0.75}>物質質量約為 </RedactedText><RedactedText trigger={isRedacting} delay={0.22} duration={0.75}><span className="font-mono">8.93 × 10<sup className="text-[0.65em] align-super leading-none">-14</sup></span> 公克，</RedactedText><RedactedText trigger={isRedacting} delay={0.28} duration={0.75}>平均生成 1 位元</RedactedText><RedactedText trigger={isRedacting} delay={0.34} duration={0.75}>僅約 0.02 秒。</RedactedText><RedactedText trigger={isRedacting} delay={0.4} duration={0.75}>在龐大數據中，</RedactedText><RedactedText trigger={isRedacting} delay={0.46} duration={0.75}>表達主觀</RedactedText><span className="m-0 p-0">情感</span><RedactedText trigger={isRedacting} delay={0.52} duration={0.75}>的字詞因缺乏</RedactedText><RedactedText trigger={isRedacting} delay={0.58} duration={0.75}>流通效益，屬於系統</RedactedText><span className="m-0 p-0">所</span><RedactedText trigger={isRedacting} delay={0.64} duration={0.75}>認定無效冗餘的存</RedactedText><span className="m-0 p-0">在</span><RedactedText trigger={isRedacting} delay={0.7} duration={0.75}>。</RedactedText>
           </p>
 
           <p className="m-0 p-0">
-            <RedactedText trigger={isRedacting} delay={0.8} duration={0.85}>本系統將針對所接收的字元執行分析，</RedactedText><RedactedText trigger={isRedacting} delay={0.88} duration={0.85}>提取最具使用價值的關鍵詞，並將其換算為等重物理質量，</RedactedText><span className="text-stone-900 font-normal m-0 p-0">抹除</span><RedactedText trigger={isRedacting} delay={0.96} duration={0.85}>其餘</RedactedText><span className="text-stone-900 font-normal m-0 p-0">無關緊要</span><RedactedText trigger={isRedacting} delay={1.04} duration={0.85}>的文字。</RedactedText>
+            <RedactedText trigger={isRedacting} delay={0.76} duration={0.75}>本系統將分析</RedactedText><RedactedText trigger={isRedacting} delay={0.82} duration={0.75}>接收字元，</RedactedText><RedactedText trigger={isRedacting} delay={0.88} duration={0.75}>提取最具利用效能</RedactedText><RedactedText trigger={isRedacting} delay={0.94} duration={0.75}>的關鍵詞，</RedactedText><span className="m-0 p-0">並</span><RedactedText trigger={isRedacting} delay={1.0} duration={0.75}>換算</RedactedText><span className="m-0 p-0">非</span><RedactedText trigger={isRedacting} delay={1.06} duration={0.75}>關鍵詞的</RedactedText><span className="m-0 p-0">剩餘</span><RedactedText trigger={isRedacting} delay={1.12} duration={0.75}>文字質量，判定無</RedactedText><span className="m-0 p-0">價值之</span><RedactedText trigger={isRedacting} delay={1.18} duration={0.75}>文字，予以清空</RedactedText><span className="m-0 p-0">處</span><RedactedText trigger={isRedacting} delay={1.24} duration={0.75}>理。</RedactedText>
           </p>
         </div>
 
