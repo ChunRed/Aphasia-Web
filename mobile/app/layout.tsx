@@ -36,7 +36,7 @@ export default function RootLayout({
         className="h-full w-full bg-white text-black overflow-hidden select-none"
         suppressHydrationWarning
       >
-        <VConsoleLoader />
+        {/* <VConsoleLoader /> */}
         {children}
       </body>
     </html>
